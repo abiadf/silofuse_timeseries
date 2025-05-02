@@ -1,0 +1,15 @@
+.vscode/
+venv/
+myenv*/
+.DS_Store
+*.ipynb_checkpoints
+*.$*.bkp
+.DS_Store
+.idea/
+myenv*/
+venv*/
+*.$*.kp
+**/__pycache__/
+*.cpython-310.pyc
+*.pyc
+*wandb/
