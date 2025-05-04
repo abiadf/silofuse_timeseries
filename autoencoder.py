@@ -1,0 +1,158 @@
+"""Module designing the autoencoder (AE) of `undercomplete` type, consisting of 2 components, encoder
+and decoder, both feedforward NN. The encoder compresses input data into latent space, and decoder
+aims to reconstruct the input data from latent space. Because the latent data is compressed, the
+encoder's output dimensions are less than its input dimensions (the opposite holds for the decoder).
+The AE's goodness is measured with a 'reconstruction loss' between input and output data;
+we iterate until the error is low enough. Useful hyperparams:
+1. # layers for encoder/decoder NN
+2. # nodes for each layer
+3. size of latent space (smaller = more info lost)"""
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+
+class Autoencoder(nn.Module):
+    """Autoencoder class containing encoder, decoder, and forward pass.
+    Attributes:
+        - input_size (int): Dimensionality of the input data
+        - hidden_dim (int): Size of the first hidden layer in encoder/decoder
+        - encoding_dim (int): Size of the second hidden layer in encoder/decoder
+        - latent_dim (int): Size of the latent representation
+        - dropout_prob (float): dropout probability
+        - encoder (nn.Sequential): encoder network
+        - decoder (nn.Sequential): decoder network"""
+    
+    def __init__(self, input_size: int, hidden_dim: int, encoding_dim: int,
+                 latent_dim: int, dropout_prob: float):
+        """Initializes Autoencoder"""
+
+        super(Autoencoder, self).__init__()
+        self.input_size   = input_size
+        self.hidden_dim   = hidden_dim
+        self.encoding_dim = encoding_dim
+        self.latent_dim   = latent_dim
+        self.dropout_prob = dropout_prob
+
+        self.encoder = self._build_encoder()
+        self.decoder = self._build_decoder()
+
+    def _build_encoder(self) -> nn.Sequential:
+        """Builds the encoder network as torch sequential model
+        - nn.Sequential: encoder network"""
+        
+        encoder = nn.Sequential(
+                    nn.Linear(self.input_size, self.hidden_dim),
+                    nn.BatchNorm1d(self.hidden_dim),
+                    # nn.ReLU(),
+                    nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
+                    nn.Dropout(self.dropout_prob),
+                    nn.Linear(self.hidden_dim, self.encoding_dim),
+                    nn.BatchNorm1d(self.encoding_dim),
+                    # nn.ReLU(),
+                    nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
+                    nn.Dropout(self.dropout_prob),
+                    nn.Linear(self.encoding_dim, self.latent_dim))
+        return encoder
+
+    def _build_decoder(self) -> nn.Sequential:
+        """Builds decoder network as torch sequential model
+        - nn.Sequential: decoder network"""
+
+        decoder = nn.Sequential(
+                    nn.Linear(self.latent_dim, self.encoding_dim),
+                    nn.BatchNorm1d(self.encoding_dim),
+                    nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
+                    # nn.ReLU(),
+                    nn.Dropout(self.dropout_prob),
+                    nn.Linear(self.encoding_dim, self.hidden_dim),
+                    nn.BatchNorm1d(self.hidden_dim),
+                    nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
+                    # nn.ReLU(),
+                    nn.Dropout(self.dropout_prob),
+                    nn.Linear(self.hidden_dim, self.input_size))
+        return decoder
+
+    def forward(self, x_input: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the autoencoder (encoder + decoder)
+        - x_input (torch.Tensor): Input tensor to encode and reconstruct
+        - encoder (nn.Module): encoder model
+        - decoder (nn.Module): decoder model
+        Returns:
+            torch.Tensor: Reconstructed output"""
+        z_latent        = self.encoder(x_input)
+        x_reconstructed = self.decoder(z_latent)
+        return x_reconstructed
+
+
+def compute_reconstruction_loss(x_input: torch.Tensor, x_reconstructed: torch.Tensor) -> torch.Tensor:
+    """Computes reconstruction loss (MSE) between input and reconstructed output
+    - x_in (torch.Tensor): Original input
+    - x_out (torch.Tensor): Reconstructed input
+    - torch.Tensor: Scalar loss value"""
+    return torch.nn.functional.mse_loss(x_reconstructed, x_input)
+
+def train_autoencoder(autoencoder: Autoencoder, epochs: int, train_loader: DataLoader,
+                      optimizer: optim.Optimizer, validation_loader: DataLoader = None, patience: int = 5) -> None:
+    """Trains the autoencoder for a specified # of epochs, with optional early stopping. A separate validation dataset, not used during training, is used to evaluate the model’s performance during training, helping to monitor the model’s ability to generalize and avoid overfitting. Args:
+        - autoencoder (Autoencoder): An instance of the Autoencoder class to train.
+        - epochs (int): Number of training epochs
+        - x_input (torch.Tensor): The input data tensor
+        - optimizer (torch.optim.Optimizer): The optimizer to use for training
+        - validation_input (torch.Tensor): Optional validation data (same shape as x_input)
+        - patience (int): Early stopping patience in epochs"""
+
+    autoencoder.train() # set to train mode, enables dropout/batchnorm (if they exist)
+    best_loss         = float('inf')
+    epochs_no_improve = 0
+
+    for epoch in range(epochs):
+        epoch_loss = 0
+        for data in train_loader:
+            x_input, _ = data
+            optimizer.zero_grad()
+            x_reconstructed = autoencoder(x_input)
+            loss = compute_reconstruction_loss(x_input, x_reconstructed)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+
+        avg_epoch_loss = epoch_loss / len(train_loader)
+        print(f'Epoch [{epoch+1}/{epochs}], training loss: {avg_epoch_loss:.4f}')
+
+        # Early stopping logic (if validation_loader is provided)
+        if validation_loader is not None:
+            autoencoder.eval()  # set to evaluation mode (disables dropout)
+            val_loss_total = 0
+            with torch.no_grad():  # disables gradient tracking
+                for data in validation_loader:
+                    x_input, _ = data
+                    x_reconstructed = autoencoder(x_input)
+                    validation_loss = compute_reconstruction_loss(x_input, x_reconstructed)
+                    val_loss_total += validation_loss.item()
+
+            avg_val_loss = val_loss_total / len(validation_loader)
+            print(f'Validation loss: {avg_val_loss:.4f}')
+
+            if avg_val_loss < best_loss:
+                best_loss = avg_val_loss
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+            if epochs_no_improve >= patience:
+                print("Early stopping triggered")
+                break
+        else:
+            print()
+    autoencoder.eval()
+
+
+# TODO to improve AE design
+# 	1.	Layer size / depth: Increase/decrease # of layers and their sizes
+# 	2.	Activation function: Replace ReLU with LeakyReLU/PReLU/SELU/GELU/Tanh/Sigmoid...
+# 	3.	Skip connections/residual connections, ONLY if network gets 5+ deeper
+#   4. change optimizer from Adam to AdamW/RMSprop/SGD+momentum/LAMB/Adabelief/Lion
+#  (usually AdamW is best)
+#   5. use regulariation techniques
+#   6. use learning rate scheduler

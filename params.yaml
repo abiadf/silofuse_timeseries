@@ -1,0 +1,17 @@
+
+dataset:
+  filename: "energy_data.csv"
+  train_valid_split: 0.8 # 80% training 20% validation
+
+autoencoder_design:
+  hidden_dim: 16
+  encoding_dim: 8
+  latent_dim: 4
+  dropout_prob: 0.1 # probability of dropping units during training
+
+autoencoder_training:
+  batch_size: 32 # number of samples per batch
+  training_epochs: 30
+  training_patience: 5
+  optimizer_lr: 0.005 # learning rate for the optimizer
+  weight_decay: 0.0000001 # for L2 regularization

@@ -8,6 +8,8 @@ pandas
 # tensorflow
 torch
 # wandb
+PyYAML
+polars
 
 # anyio==4.9.0
 # argon2-cffi==23.1.0
