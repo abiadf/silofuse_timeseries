@@ -1,17 +1,35 @@
-
 dataset:
-  filename: "energy_data.csv"
-  train_valid_split: 0.8 # 80% training 20% validation
+  filename:          "energy_data.csv"
+  train_valid_split: 0.8  # 80% training 20% validation
 
 autoencoder_design:
-  hidden_dim: 16
-  encoding_dim: 8
-  latent_dim: 4
-  dropout_prob: 0.1 # probability of dropping units during training
+  hidden_dim:        22   # layer 1 nodes
+  encoding_dim:      10   # layer 2 nodes
+  latent_dim:        6    # latent layer nodes
+  dropout_prob:      0.1  # probability of dropping units during training
 
 autoencoder_training:
-  batch_size: 32 # number of samples per batch
-  training_epochs: 30
-  training_patience: 5
-  optimizer_lr: 0.005 # learning rate for the optimizer
-  weight_decay: 0.0000001 # for L2 regularization
+  batch_size:        32        # number of samples per batch
+  training_epochs:   30        # training epochs
+  training_patience: 5         # how many epochs with no improvement to stop training
+  optimizer_lr:      0.005     # learning rate for the optimizer
+  weight_decay:      0.0000001 # for L2 regularization
+
+diffusion_design:
+  diff_steps:        4         # num of diffusion steps
+
+noise_scheduler:               # for diffusion
+  cos_start_offset:  0.008     # small offset that smooths the early part of cos schedule (avoid instability or extreme vals)
+  noise_profile:     'l'       # l = linear, c = cos, q = quadratic
+  start_noise_val:   0.000     # start noise value 
+  end_noise_val:     0.02      # end noise value
+
+diffusion_training:
+  train_epochs:      4         # num of diffusion training epochs
+  training_patience: 5         # how many epochs with no improvement to stop training
+  optimizer_lr:      0.005     # learning rate for the optimizer
+  weight_decay:      0.0000001 # for L2 regularization
+
+Unet_design:
+  base_channels:     18   # initial # of channels in 1st convolution layer
+  dropout_prob:      0.1  # probability of dropping units during training

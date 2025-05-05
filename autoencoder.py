@@ -1,9 +1,4 @@
-"""Module designing the autoencoder (AE) of `undercomplete` type, consisting of 2 components, encoder
-and decoder, both feedforward NN. The encoder compresses input data into latent space, and decoder
-aims to reconstruct the input data from latent space. Because the latent data is compressed, the
-encoder's output dimensions are less than its input dimensions (the opposite holds for the decoder).
-The AE's goodness is measured with a 'reconstruction loss' between input and output data;
-we iterate until the error is low enough. Useful hyperparams:
+"""Module designing the autoencoder (AE) of `undercomplete` type, consisting of 2 components, encoder and decoder, both feedforward NN. The encoder compresses input data into latent space, and decoder aims to reconstruct the input data from latent space. Because the latent data is compressed, the encoder's output dimensions are less than its input dimensions (the opposite holds for the decoder). The AE's goodness is measured with a 'reconstruction loss' between input and output data; we iterate until the error is low enough. Useful hyperparams:
 1. # layers for encoder/decoder NN
 2. # nodes for each layer
 3. size of latent space (smaller = more info lost)"""
@@ -39,7 +34,7 @@ class Autoencoder(nn.Module):
         self.decoder = self._build_decoder()
 
     def _build_encoder(self) -> nn.Sequential:
-        """Builds the encoder network as torch sequential model
+        """Builds the encoder network as torch sequential model. Currently 2 layers + batchnorm and dropout
         - nn.Sequential: encoder network"""
         
         encoder = nn.Sequential(
@@ -110,10 +105,10 @@ def train_autoencoder(autoencoder: Autoencoder, epochs: int, train_loader: DataL
     for epoch in range(epochs):
         epoch_loss = 0
         for data in train_loader:
-            x_input, _ = data
+            x_input, _     = data
             optimizer.zero_grad()
-            x_reconstructed = autoencoder(x_input)
-            loss = compute_reconstruction_loss(x_input, x_reconstructed)
+            x_reconstructed= autoencoder(x_input)
+            loss           = compute_reconstruction_loss(x_input, x_reconstructed)
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
@@ -123,11 +118,11 @@ def train_autoencoder(autoencoder: Autoencoder, epochs: int, train_loader: DataL
 
         # Early stopping logic (if validation_loader is provided)
         if validation_loader is not None:
-            autoencoder.eval()  # set to evaluation mode (disables dropout)
+            autoencoder.eval() # set to evaluation mode (disables dropout)
             val_loss_total = 0
-            with torch.no_grad():  # disables gradient tracking
+            with torch.no_grad(): # disables gradient tracking
                 for data in validation_loader:
-                    x_input, _ = data
+                    x_input, _      = data
                     x_reconstructed = autoencoder(x_input)
                     validation_loss = compute_reconstruction_loss(x_input, x_reconstructed)
                     val_loss_total += validation_loss.item()
@@ -136,11 +131,11 @@ def train_autoencoder(autoencoder: Autoencoder, epochs: int, train_loader: DataL
             print(f'Validation loss: {avg_val_loss:.4f}')
 
             if avg_val_loss < best_loss:
-                best_loss = avg_val_loss
-                epochs_no_improve = 0
+                best_loss        = avg_val_loss
+                epochs_no_improve= 0
             else:
                 epochs_no_improve += 1
-            if epochs_no_improve >= patience:
+            if epochs_no_improve  >= patience:
                 print("Early stopping triggered")
                 break
         else:
@@ -151,7 +146,7 @@ def train_autoencoder(autoencoder: Autoencoder, epochs: int, train_loader: DataL
 # TODO to improve AE design
 # 	1.	Layer size / depth: Increase/decrease # of layers and their sizes
 # 	2.	Activation function: Replace ReLU with LeakyReLU/PReLU/SELU/GELU/Tanh/Sigmoid...
-# 	3.	Skip connections/residual connections, ONLY if network gets 5+ deeper
+# 	3.	Skip connections/residual connections, ONLY if network >5 layers
 #   4. change optimizer from Adam to AdamW/RMSprop/SGD+momentum/LAMB/Adabelief/Lion
 #  (usually AdamW is best)
 #   5. use regulariation techniques

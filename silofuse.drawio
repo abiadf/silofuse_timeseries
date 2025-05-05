@@ -1,6 +1,6 @@
 <mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/26.2.15 Chrome/134.0.6998.205 Electron/35.2.1 Safari/537.36" version="26.2.15">
   <diagram name="Page-1" id="JjwUheqJY2ZCm73Q5_2k">
-    <mxGraphModel dx="1356" dy="3246" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3300" pageHeight="2339" math="0" shadow="0">
+    <mxGraphModel dx="1098" dy="3073" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3300" pageHeight="2339" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -199,15 +199,6 @@
         </mxCell>
         <mxCell id="StZCGAJTF5gD0mND2wx7-75" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;Client 3&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
           <mxGeometry x="260" y="-1908.75" width="67.37" height="30" as="geometry" />
-        </mxCell>
-        <mxCell id="FcWg5_FiKRuBWlP4FQt--2" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=default;strokeWidth=2;dashed=1;dashPattern=8 8;" parent="1" vertex="1">
-          <mxGeometry x="457.25" y="-1960" width="100" height="140" as="geometry" />
-        </mxCell>
-        <mxCell id="FcWg5_FiKRuBWlP4FQt--4" value="" style="endArrow=classic;html=1;rounded=0;strokeWidth=2;exitX=0.026;exitY=0.938;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="FcWg5_FiKRuBWlP4FQt--2" edge="1">
-          <mxGeometry width="50" height="50" relative="1" as="geometry">
-            <mxPoint x="447.25" y="-1830" as="sourcePoint" />
-            <mxPoint x="300" y="-1800" as="targetPoint" />
-          </mxGeometry>
         </mxCell>
         <mxCell id="ApuEfaeunSIdCrskBRzv-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="FcWg5_FiKRuBWlP4FQt--7" target="StZCGAJTF5gD0mND2wx7-47">
           <mxGeometry relative="1" as="geometry" />
@@ -611,6 +602,9 @@
         </mxCell>
         <mxCell id="ApuEfaeunSIdCrskBRzv-12" value="&lt;font style=&quot;font-size: 15px;&quot;&gt;Encoder zoom in&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1" vertex="1" parent="1">
           <mxGeometry x="2406.35" y="-1898.58" width="80" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="ApuEfaeunSIdCrskBRzv-15" value="&lt;font style=&quot;font-size: 22px;&quot;&gt;Clean Data -&amp;gt; Forward Noising -&amp;gt; Noisy Data&lt;br&gt;Noisy Data + Timestep -&amp;gt; UNet (predict_noise) -&amp;gt; Predicted Noise&lt;br&gt;Noisy Data + Predicted Noise + Noise Schedule -&amp;gt; Reverse Denoising (iterative) -&amp;gt; Reconstructed Data&lt;br&gt;&lt;br&gt;Training:&lt;br&gt;  Clean Data -&amp;gt; Forward Noising -&amp;gt; Noisy Data + True Noise&lt;br&gt;  Noisy Data + Timestep --&amp;gt; UNet -&amp;gt; Predicted Noise&lt;br&gt;  Compare Predicted Noise with True Noise -&amp;gt; Calculate Loss -&amp;gt; Update UNet&lt;/font&gt;" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1870" y="-1750" width="840" height="350" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
