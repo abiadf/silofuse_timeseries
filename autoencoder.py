@@ -8,6 +8,10 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
+
 class Autoencoder(nn.Module):
     """Autoencoder class containing encoder, decoder, and forward pass.
     Attributes:
@@ -30,8 +34,8 @@ class Autoencoder(nn.Module):
         self.latent_dim   = latent_dim
         self.dropout_prob = dropout_prob
 
-        self.encoder = self._build_encoder()
-        self.decoder = self._build_decoder()
+        self.encoder = self._build_encoder().to(device)
+        self.decoder = self._build_decoder().to(device)
 
     def _build_encoder(self) -> nn.Sequential:
         """Builds the encoder network as torch sequential model. Currently 2 layers + batchnorm and dropout
@@ -70,14 +74,18 @@ class Autoencoder(nn.Module):
         return decoder
 
     def forward(self, x_input: torch.Tensor) -> torch.Tensor:
-        """Forward pass through the autoencoder (encoder + decoder)
+        """Forward pass through the autoencoder (encoder + decoder). NOTE we also add a skip connection
         - x_input (torch.Tensor): Input tensor to encode and reconstruct
         - encoder (nn.Module): encoder model
         - decoder (nn.Module): decoder model
         Returns:
             torch.Tensor: Reconstructed output"""
+        x_input         = x_input.to(device)
         z_latent        = self.encoder(x_input)
         x_reconstructed = self.decoder(z_latent)
+
+        # skip connection
+        x_reconstructed = x_reconstructed + x_input
         return x_reconstructed
 
 
@@ -86,10 +94,42 @@ def compute_reconstruction_loss(x_input: torch.Tensor, x_reconstructed: torch.Te
     - x_in (torch.Tensor): Original input
     - x_out (torch.Tensor): Reconstructed input
     - torch.Tensor: Scalar loss value"""
+
+    # MSE
     return torch.nn.functional.mse_loss(x_reconstructed, x_input)
 
-def train_autoencoder(autoencoder: Autoencoder, epochs: int, train_loader: DataLoader,
-                      optimizer: optim.Optimizer, validation_loader: DataLoader = None, patience: int = 5) -> None:
+    # MAE
+    return torch.nn.functional.l1_loss(x_reconstructed, x_input)
+
+
+def _train_epoch(device: torch.device, autoencoder: Autoencoder, train_loader: DataLoader, optimizer: optim.Optimizer) -> float:
+    autoencoder.train()  # set to train mode
+    epoch_loss = 0
+    for data in train_loader:
+        x_input, _ = data
+        x_input    = x_input.to(device)
+        optimizer.zero_grad()
+        x_reconstructed = autoencoder(x_input)
+        loss = compute_reconstruction_loss(x_input, x_reconstructed)
+        loss.backward()
+        optimizer.step()
+        epoch_loss += loss.item()
+    return epoch_loss / len(train_loader)
+
+def _validation_epoch(device: torch.device, autoencoder: Autoencoder, validation_loader: DataLoader) -> float:
+    autoencoder.eval()  # set to evaluation mode
+    val_loss_total = 0
+    with torch.no_grad():  # disables gradient tracking
+        for data in validation_loader:
+            x_input, _ = data
+            x_input    = x_input.to(device)
+            x_reconstructed = autoencoder(x_input)
+            validation_loss = compute_reconstruction_loss(x_input, x_reconstructed)
+            val_loss_total += validation_loss.item()
+    return val_loss_total / len(validation_loader)
+
+def train_autoencoder(device: torch.device, autoencoder: Autoencoder, epochs: int, train_loader: DataLoader,
+                      optimizer: optim.Optimizer, scheduler, validation_loader: DataLoader = None, patience: int = 5) -> None:
     """Trains the autoencoder for a specified # of epochs, with optional early stopping. A separate validation dataset, not used during training, is used to evaluate the model’s performance during training, helping to monitor the model’s ability to generalize and avoid overfitting. Args:
         - autoencoder (Autoencoder): An instance of the Autoencoder class to train.
         - epochs (int): Number of training epochs
@@ -98,37 +138,20 @@ def train_autoencoder(autoencoder: Autoencoder, epochs: int, train_loader: DataL
         - validation_input (torch.Tensor): Optional validation data (same shape as x_input)
         - patience (int): Early stopping patience in epochs"""
 
-    autoencoder.train() # set to train mode, enables dropout/batchnorm (if they exist)
+    autoencoder.to(device)
     best_loss         = float('inf')
     epochs_no_improve = 0
 
     for epoch in range(epochs):
-        epoch_loss = 0
-        for data in train_loader:
-            x_input, _     = data
-            optimizer.zero_grad()
-            x_reconstructed= autoencoder(x_input)
-            loss           = compute_reconstruction_loss(x_input, x_reconstructed)
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item()
-
-        avg_epoch_loss = epoch_loss / len(train_loader)
+        avg_epoch_loss = _train_epoch(device, autoencoder, train_loader, optimizer)
         print(f'Epoch [{epoch+1}/{epochs}], training loss: {avg_epoch_loss:.4f}')
 
         # Early stopping logic (if validation_loader is provided)
         if validation_loader is not None:
-            autoencoder.eval() # set to evaluation mode (disables dropout)
-            val_loss_total = 0
-            with torch.no_grad(): # disables gradient tracking
-                for data in validation_loader:
-                    x_input, _      = data
-                    x_reconstructed = autoencoder(x_input)
-                    validation_loss = compute_reconstruction_loss(x_input, x_reconstructed)
-                    val_loss_total += validation_loss.item()
-
-            avg_val_loss = val_loss_total / len(validation_loader)
+            avg_val_loss = _validation_epoch(device, autoencoder, validation_loader)
             print(f'Validation loss: {avg_val_loss:.4f}')
+
+            scheduler.step(avg_val_loss)
 
             if avg_val_loss < best_loss:
                 best_loss        = avg_val_loss
@@ -138,8 +161,6 @@ def train_autoencoder(autoencoder: Autoencoder, epochs: int, train_loader: DataL
             if epochs_no_improve  >= patience:
                 print("Early stopping triggered")
                 break
-        else:
-            print()
     autoencoder.eval()
 
 

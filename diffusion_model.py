@@ -8,6 +8,11 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from typing import Callable, Sequence, Tuple
 
+# Determine if CUDA is available and set the device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
+
 def forward_diffusion(x_0: torch.Tensor, t: torch.Tensor, betas: torch.Tensor) -> torch.Tensor:
     """Given original data x_0 at t=0, compute x_t for ANY timestep directly, using DDPM formula:
         x_t = sqrt(ᾱ_t) * x_0 + sqrt(1 - ᾱ_t) * ε
@@ -15,9 +20,9 @@ def forward_diffusion(x_0: torch.Tensor, t: torch.Tensor, betas: torch.Tensor) -
     Used during training instead of looping through all diffusion steps"""
     device      = x_0.device
     alphas      = 1. - betas
-    alpha_bars  = torch.cumprod(alphas, dim=0)
+    alpha_bars  = torch.cumprod(alphas, dim=0).to(x_0.device)
     alpha_bar_t = alpha_bars[t].reshape(-1, 1, 1)  # (batch, 1, 1) for correct broadcasting
-    noise       = torch.randn_like(x_0)
+    noise       = torch.randn_like(x_0).to(x_0.device)
     x_t         = torch.sqrt(alpha_bar_t) * x_0 + torch.sqrt(1 - alpha_bar_t) * noise
     return x_t, noise
 
@@ -33,7 +38,7 @@ def reverse_diffusion(model: Callable[[Tensor, int], Tensor], x_t: Tensor,
     
     betas      = torch.tensor(betas, device=x_t.device)
     alphas     = 1 - betas
-    alpha_bars = torch.cumprod(alphas, dim=0)
+    alpha_bars = torch.cumprod(alphas, dim=0).to(x_t.device)
 
     for t in reversed(range(diff_steps)):
         alpha_t    = alphas[t]
@@ -46,7 +51,7 @@ def reverse_diffusion(model: Callable[[Tensor, int], Tensor], x_t: Tensor,
         mean  = coef1 * (x_t - coef2 * noise_pred)
 
         if t > 0 and stochastic:
-            noise = torch.randn_like(x_t)
+            noise = torch.randn_like(x_t).to(x_t.device)
             sigma = beta_t.sqrt()
             x_t   = mean + sigma * noise
         else:
@@ -58,19 +63,19 @@ def get_noise_schedule(start_val: float, end_val: float, diff_steps: int,
     """Generate a noise schedule (linear, cosine, quadratic) given start/end values and number of steps"""
     
     if noise_profile == 'l': # linear schedule
-        return torch.linspace(start_val, end_val, diff_steps)
-    
+        return torch.linspace(start_val, end_val, diff_steps).to(device)
+
     elif noise_profile == 'c': # cos schedule
         steps      = torch.linspace(0, 1, diff_steps + 1)  # Normalize steps to [0, 1]
         f          = lambda t: torch.cos((t + cos_start_offset) * math.pi / 2) ** 2
         alphas_bar = f(steps) / f(0)  # Compute cumulative product
         betas      = 1 - (alphas_bar[1:] / alphas_bar[:-1])
-        return betas.clamp(max=0.999) # ensure betas <1
+        return betas.clamp(max=0.999).to(device) # ensure betas <1
 
     elif noise_profile == 'q': # quadratic schedule
         steps = torch.linspace(0, 1, diff_steps)
         betas = start_val + (end_val - start_val) * (steps ** 2)
-        return betas
+        return betas.to(device)
 
     else:
         raise ValueError(f"Unknown noise profile: {noise_profile}")
@@ -96,12 +101,13 @@ class UNet(nn.Module):
     CHANNEL_MUL    = 2 # Channel scaling factor
     OUTPUT_KERNEL  = 1 # Final conv kernel size
 
-    def __init__(self, input_channels: int, dropout_prob: float, base_channels: int = 64) -> None:
+    def __init__(self, input_channels: int, dropout_prob: float, embedding_dim: int = 128, base_channels: int = 64) -> None:
         """Initialize UNet with input and base channel sizes. The `input_channels` parameter
         specifies the # of independent features (timeseries) in the input data"""
         super().__init__()
 
-        self.dropout_prob = dropout_prob
+        self.dropout_prob  = dropout_prob
+        self.embedding_dim = embedding_dim
 
         # Downsample
         self.down1 = self.conv_block(input_channels, base_channels)
@@ -120,6 +126,13 @@ class UNet(nn.Module):
 
         # Output
         self.output   = nn.Conv1d(base_channels, input_channels, kernel_size=self.OUTPUT_KERNEL)
+
+        # Time embedding (Conditioning on timestep)
+        self.time_embed = nn.Sequential(
+                            nn.Linear(embedding_dim, base_channels * self.CHANNEL_MUL),
+                            nn.ReLU(),
+                            nn.Linear(base_channels * self.CHANNEL_MUL, base_channels * self.CHANNEL_MUL))
+        self.to(device)
 
     def conv_block(self, in_channels: int, out_channels: int) -> nn.Sequential:
         """Returns 2-layer convolutional block for 1D timeseries data. This block consists of
@@ -142,8 +155,7 @@ class UNet(nn.Module):
                 nn.Dropout(self.dropout_prob))
         return unet
 
-    # TODO: add functionality of `t` in this function (now we just have it in the function call)
-    def forward(self, x: torch.Tensor, t: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Forward pass through the UNet architecture for denoising; this method implements the
         encoding (downsampling), bottleneck, and decoding (upsampling) stages of the UNet. Skip
         connections are used to pass feature maps from the downsampling path to the corresponding
@@ -156,35 +168,54 @@ class UNet(nn.Module):
                                     Defaults to None, but can be used by the convolutional blocks if needed
         - output (torch.Tensor): The output tensor, representing the denoised prediction
                           Shape: [batch_size, num_channels, sequence_length]"""
+
         # Down path (encoder)
         x1 = self.down1(x)
         x2 = self.down2(self.pool(self.pad(x1)))
+        x3 = self.pool(self.pad(x2))
+
+        # Time embedding for conditioning
+        if t is not None:
+            t_emb = get_timestep_embedding(t, self.embedding_dim)
+            t_emb = self.time_embed(t_emb).unsqueeze(-1)  # Add channel dimension
+            x3    = x3 + t_emb  # Inject timestep info into bottleneck features
 
         # Bottleneck ('latent')
-        x3 = self.bottleneck(self.pool(self.pad(x2)))
+        x3 = self.bottleneck(self.pool(self.pad(x3)))
 
         # Up path (decoder)
         x = self.up1(x3)
 
-        # skip connection 1
-        padding   = [0, x.shape[-1] - x2.shape[-1]]  # Pad at the end
-        x2_padded = F.pad(x2, padding, "constant", 0)
+        # Skip connection 1
+        # x2_padded = F.pad(x2, [0, x.shape[-1] - x2.shape[-1]], "constant", 0)
+        x2_padded = F.pad(x2, [0, x.shape[-1] - x2.shape[-1]]) if x2.shape[-1] != x.shape[-1] else x2
         x = self.conv_up1(torch.cat([x, x2_padded], dim=self.CAT_DIM))
-        x = self.up2(x)
 
-        # skip connection 2
-        padding   = [0, x.shape[-1] - x1.shape[-1]]
-        x1_padded = F.pad(x1, padding, "constant", 0)
+        # Skip connection 2
+        x = self.up2(x)
+        x1_padded = F.pad(x1, [0, x.shape[-1] - x1.shape[-1]], "constant", 0)
         x = self.conv_up2(torch.cat([x, x1_padded], dim=self.CAT_DIM))
 
         return self.output(x)
 
-def predict_noise(model: nn.Module, x_t: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-    """Predicts the noise added to a sample at timestep t using the denoising model
-    Purpose: Wrapper for clarity around model(x_t, t)
-    Why: Separates model logic from training code and improves readability"""
-    return model(x_t, t)
 
+def get_timestep_embedding(timesteps: torch.Tensor, embedding_dim: int) -> torch.Tensor:
+    """Generate sinusoidal timestep embeddings for time-conditioned models.
+        - timesteps (torch.Tensor): Tensor of timesteps.
+        - embedding_dim (int): Embedding dimension, must be even.
+    Returns:
+        torch.Tensor: Timestep embeddings.
+    Motivation:
+        The constant `10000.0` is a scaling factor ensuring a range of frequencies in the embedding, derived from the original Transformer architecture. It balances high- and low-frequency signals for effective time-step representation"""
+
+    half_dim = embedding_dim // 2
+    emb = torch.log(torch.tensor(10000.0)) / (half_dim - 1)
+    emb = torch.exp(torch.arange(half_dim, device=timesteps.device) * -emb)
+    emb = timesteps[:, None].float() * emb[None, :]
+    emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
+    if embedding_dim % 2 == 1:
+        emb = F.pad(emb, (0, 1))
+    return emb
 
 def compute_mse_loss(predicted_noise, true_noise):
     """Computes MSE loss given 2 inputs"""
@@ -211,11 +242,12 @@ def _train_epoch(model: nn.Module, train_loader: DataLoader, optimizer: optim.Op
         x_0 = _prepare_batch(batch, device, num_channels)
         t   = torch.randint(0, diffusion_steps, (x_0.size(0),), device=device)
         x_t, true_noise = forward_diffusion(x_0, t, betas)
-        predicted_noise = predict_noise(model, x_t, t)
+        predicted_noise = model(x_t, t)
         loss = compute_mse_loss(predicted_noise, true_noise)
 
         optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # prevents exploding gradients
         optimizer.step()
 
         total_loss += loss.item() * x_0.size(0)
@@ -232,11 +264,11 @@ def _validation_epoch(model: nn.Module, validation_loader: DataLoader, betas: to
             x_0 = _prepare_batch(batch, device, num_channels)
             t   = torch.randint(0, diffusion_steps, (x_0.size(0),), device=device)
             x_t, true_noise = forward_diffusion(x_0, t, betas)
-            predicted_noise = predict_noise(model, x_t, t)
+            predicted_noise = model(x_t, t)
             val_loss += compute_mse_loss(predicted_noise, true_noise).item() * x_0.size(0)
     return val_loss / len(validation_loader.dataset)
 
-def train_diffusion(model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, betas: torch.Tensor,
+def train_diffusion(device: torch.device, model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, scheduler, betas: torch.Tensor,
                     diffusion_steps: int, epochs: int, validation_loader: DataLoader = None, patience: int = 5) -> None:
     """Trains diffusion model with given training dataset, and optional validation dataset (and avg loss
     over validation dataset). We also add early stopping. Args:
@@ -250,29 +282,30 @@ def train_diffusion(model: nn.Module, train_loader: DataLoader, optimizer: optim
         - patience (int, optional): Number of epochs to wait before early stopping if validation loss doesn't improve. Defaults to 5
         - output (None): function performs in-place training and prints training progress"""
 
+    model.to(device)
     best_val_loss    = float('inf')
     patience_counter = 0
 
-    device       = next(model.parameters()).device
     num_channels = model.output.in_channels if hasattr(model, 'output') and hasattr(model.output, 'in_channels') else model.down1[0].in_channels
 
     for epoch in range(epochs):
         avg_loss = _train_epoch(model, train_loader, optimizer, betas, diffusion_steps, device, num_channels)
-        print(f"Epoch [{epoch+1}/{epochs}], Loss: {avg_loss:.4f}", end="")
+        print(f"Epoch [{epoch+1}/{epochs}], loss: {avg_loss:.4f}", end="")
 
         if validation_loader:
             avg_val_loss = _validation_epoch(model, validation_loader, betas, diffusion_steps, device, num_channels)
-            print(f", Val Loss: {avg_val_loss:.4f}")
+            print(f", Validation loss: {avg_val_loss:.4f}")
 
             if avg_val_loss   < best_val_loss:
                 best_val_loss = avg_val_loss
                 patience_counter = 0
             else:
                 patience_counter += 1
-                print(f"Patience: {patience_counter}/{patience}")
+                # print(f"Patience: {patience_counter}/{patience}")
                 if patience_counter >= patience:
                     print("Early stopping triggered!")
                     break
+        scheduler.step()
 
 def sample_new_data(model: nn.Module, betas: torch.Tensor, diff_steps: int, shape: tuple[int, ...]) -> Tensor:
     """Samples new data by reversing the diffusion process, starting from random noise. Args:
@@ -282,7 +315,7 @@ def sample_new_data(model: nn.Module, betas: torch.Tensor, diff_steps: int, shap
         - shape (tuple[int, ...]): shape of the generated sample (e.g., (batch_size, channels, height, width))
         - output (torch.Tensor): generated sample after reversing the diffusion process"""
 
-    x_t = torch.randn(shape)
+    x_t = torch.randn(shape).to(device)
     for _ in reversed(range(diff_steps)):
         x_t = reverse_diffusion(model, x_t, betas, diff_steps)
     return x_t

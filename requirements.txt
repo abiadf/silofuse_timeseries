@@ -3,7 +3,7 @@ jupyter
 ipykernel
 numpy
 pandas
-# scikit-learn
+scikit-learn
 # seaborn
 # tensorflow
 torch
