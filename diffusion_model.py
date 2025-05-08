@@ -5,7 +5,7 @@ import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 from typing import Callable, Sequence, Tuple
 
 # Determine if CUDA is available and set the device
@@ -82,11 +82,10 @@ def get_noise_schedule(start_val: float, end_val: float, diff_steps: int,
 
 
 # TODO: change bottleneck line from `self.CHANNEL_MUL**2` to *2
-# add batchnorm
 # consider larger or non-square `UPSAMPLE_SCALE`
 # add temporal attention (or give them different weights) to focus on important timesteps
 # add multi-input layer to account for multivariate timeseries
-# use right loss finction; MSE for timeseries regression, crossentropyloss for classification
+# use right loss function; MSE for timeseries regression, crossentropyloss for classification
 class UNet(nn.Module):
     """UNet NN MODEL for 1D, contains skip connections, downsampling, and upsampling
     NOTE: used torch functions tailored to timeseries (1D), 1d is in their name"""
@@ -96,7 +95,7 @@ class UNet(nn.Module):
     PADDING        = 1 # Padding for same-size output
 
     # tunable
-    KERNEL_SIZE    = 3 # Conv kernel size
+    KERNEL_SIZE    = 3 # Convolution layer kernel size
     UPSAMPLE_SCALE = 2 # Pooling/upsample scale
     CHANNEL_MUL    = 2 # Channel scaling factor
     OUTPUT_KERNEL  = 1 # Final conv kernel size
@@ -306,6 +305,29 @@ def train_diffusion(device: torch.device, model: nn.Module, train_loader: DataLo
                     print("Early stopping triggered!")
                     break
         scheduler.step()
+
+
+def train_multi_client_diffusion_ldm(client_data_list, client_feature_counts, autoencoder_list, diffusion_model,
+                                     optimizer_diffusion, betas, diffusion_steps, num_epochs_diff=10, batch_size=64):
+    print("Training Diffusion Model on Latent Representations...")
+    combined_latent_representations = []
+    for i, client_data in enumerate(client_data_list):
+        autoencoder   = autoencoder_list[i] if len(autoencoder_list) > 1 else autoencoder_list[0]
+        dataloader    = DataLoader(TensorDataset(client_data), batch_size=batch_size, shuffle=False)
+        client_latents= []
+        with torch.no_grad():
+            for batch in dataloader:
+                latents = autoencoder.encode_to_latent(batch[0])
+                client_latents.append(latents)
+        combined_latent_representations.append(torch.cat(client_latents, dim=1)) # Concatenate along feature dimension
+
+    combined_latent_tensor= torch.cat(combined_latent_representations, dim=1)
+    latent_dataloader     = DataLoader(TensorDataset(combined_latent_tensor), batch_size=batch_size, shuffle=True)
+    num_latent_features   = combined_latent_tensor.shape[1] # Get the total number of latent features
+
+    train_diffusion(device, diffusion_model, latent_dataloader, optimizer_diffusion,
+                    None, betas, diffusion_steps, num_epochs_diff, num_channels=num_latent_features) # Pass num_latent_features as num_channels
+
 
 def sample_new_data(model: nn.Module, betas: torch.Tensor, diff_steps: int, shape: tuple[int, ...]) -> Tensor:
     """Samples new data by reversing the diffusion process, starting from random noise. Args:
