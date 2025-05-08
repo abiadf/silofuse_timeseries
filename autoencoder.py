@@ -89,6 +89,26 @@ class Autoencoder(nn.Module):
         return x_reconstructed
 
 
+    # ====================
+    def encode_to_latent(self, x_input: torch.Tensor) -> torch.Tensor:
+        """[LDM] Encodes the input into the latent space."""
+        x_input  = x_input.to(device)
+        z_latent = self.encoder(x_input)
+        return z_latent
+
+    def decode_from_latent(self, z_latent: torch.Tensor) -> torch.Tensor:
+        """[LDM] Decodes the latent representation back to the data space."""
+        z_latent        = z_latent.to(device)
+        x_reconstructed = self.decoder(z_latent)
+        return x_reconstructed
+
+    def forward_latent(self, x_input: torch.Tensor) -> torch.Tensor:
+        """[LDM] Combined encode and decode (for standard autoencoder training)."""
+        latent        = self.encode_to_latent(x_input)
+        reconstructed = self.decode_from_latent(latent)
+        return reconstructed
+
+
 def compute_reconstruction_loss(x_input: torch.Tensor, x_reconstructed: torch.Tensor) -> torch.Tensor:
     """Computes reconstruction loss (MSE) between input and reconstructed output
     - x_in (torch.Tensor): Original input
