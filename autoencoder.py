@@ -8,6 +8,8 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
+from utils import compute_reconstruction_loss
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
@@ -109,18 +111,6 @@ class Autoencoder(nn.Module):
         return reconstructed
 
 
-def compute_reconstruction_loss(x_input: torch.Tensor, x_reconstructed: torch.Tensor) -> torch.Tensor:
-    """Computes reconstruction loss (MSE) between input and reconstructed output
-    - x_in (torch.Tensor): Original input
-    - x_out (torch.Tensor): Reconstructed input
-    - torch.Tensor: Scalar loss value"""
-
-    # MSE
-    return torch.nn.functional.mse_loss(x_reconstructed, x_input)
-
-    # MAE
-    return torch.nn.functional.l1_loss(x_reconstructed, x_input)
-
 
 def _train_epoch(device: torch.device, autoencoder: Autoencoder, train_loader: DataLoader, optimizer: optim.Optimizer) -> float:
     autoencoder.train()  # set to train mode
@@ -137,9 +127,9 @@ def _train_epoch(device: torch.device, autoencoder: Autoencoder, train_loader: D
     return epoch_loss / len(train_loader)
 
 def _validation_epoch(device: torch.device, autoencoder: Autoencoder, validation_loader: DataLoader) -> float:
-    autoencoder.eval()  # set to evaluation mode
+    autoencoder.eval()
     val_loss_total = 0
-    with torch.no_grad():  # disables gradient tracking
+    with torch.no_grad(): # disables gradient tracking
         for data in validation_loader:
             x_input, _ = data
             x_input    = x_input.to(device)
