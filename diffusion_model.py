@@ -15,6 +15,7 @@ print(f"Using device: {device}")
 
 class Diffusion():
 
+    @staticmethod
     def forward_diffusion(x_0: torch.Tensor, t: torch.Tensor, betas: torch.Tensor) -> torch.Tensor:
         """Given original data x_0 at t=0, compute x_t for ANY timestep directly, using DDPM formula:
             x_t = sqrt(ᾱ_t) * x_0 + sqrt(1 - ᾱ_t) * ε
@@ -28,8 +29,9 @@ class Diffusion():
         x_t         = torch.sqrt(alpha_bar_t) * x_0 + torch.sqrt(1 - alpha_bar_t) * noise
         return x_t, noise
 
+    @staticmethod
     def reverse_diffusion(model: Callable[[Tensor, int], Tensor], x_t: Tensor,
-                          betas: Sequence[float], diff_steps: int, stochastic: bool = True) -> Tensor:
+                          betas: Sequence[float], diff_steps: int, DDPM_or_not: bool = True) -> Tensor:
         """Reverse diffusion (denoising) using a trained model, and DDPM (full posterior mean + stochastic noise) or DDIM
         - model (Callable): model that predicts noise given (x_t, t)
         - x_t (Tensor): noised input at timestep `diff_steps`
@@ -46,11 +48,9 @@ class Diffusion():
             alpha_t    = alphas[t]
             alpha_bar_t= alpha_bars[t]
             beta_t     = betas[t]
-            # noise_pred = model(x_t, t)
             t_tensor   = torch.tensor([t] * x_t.shape[0], device=x_t.device).long() # Convert t to a tensor
             noise_pred = model(x_t, t_tensor)
-
-            noise_pred = torch.clamp(noise_pred, -10.0, 10.0) # Add this line
+            noise_pred = torch.clamp(noise_pred, -10.0, 10.0)
 
             # # check last few steps
             # if t > diff_steps - 5: # Check the last few steps
@@ -70,7 +70,7 @@ class Diffusion():
             coef2 = (1 - alpha_t) / (1 - alpha_bar_t).sqrt()
             mean  = coef1 * (x_t - coef2 * noise_pred)
 
-            if t > 0 and stochastic:
+            if t > 0 and DDPM_or_not:
                 noise = torch.randn_like(x_t).to(x_t.device)
                 sigma = beta_t.sqrt()
                 x_t   = mean + sigma * noise
@@ -78,6 +78,7 @@ class Diffusion():
                 x_t = mean
         return x_t
 
+    @staticmethod
     def get_noise_schedule(start_val: float, end_val: float, diff_steps: int,
                            cos_start_offset: float, noise_profile: str = 'l') -> torch.Tensor:
         """Generate a noise schedule (linear, cosine, quadratic) given start/end values and number of steps"""
@@ -85,12 +86,14 @@ class Diffusion():
         if noise_profile == 'l': # linear schedule
             return torch.linspace(start_val, end_val, diff_steps).to(device)
 
-        elif noise_profile == 'c': # cos schedule
-            steps      = torch.linspace(0, 1, diff_steps + 1)  # Normalize steps to [0, 1]
-            f          = lambda t: torch.cos((t + cos_start_offset) * math.pi / 2) ** 2
-            alphas_bar = f(steps) / f(0)  # Compute cumulative product
-            betas      = 1 - (alphas_bar[1:] / alphas_bar[:-1])
-            return betas.clamp(max=0.999).to(device) # ensure betas <1
+        elif noise_profile == 'c':  # cos schedule
+            steps = torch.linspace(0, 1, diff_steps + 1)  # Normalize steps to [0, 1]
+            offset = torch.tensor(cos_start_offset, dtype=steps.dtype, device=steps.device)
+            f = lambda t: torch.cos((t * 0.5 + offset) * torch.pi) ** 2
+            alphas_bar = f(steps) / f(torch.tensor(0.0, dtype=steps.dtype, device=steps.device))  # Compute cumulative product
+            betas = 1 - (alphas_bar[1:] / alphas_bar[:-1])
+            betas = betas.clamp(min=1e-5, max=0.02)  # Much safer max
+            return betas
 
         elif noise_profile == 'q': # quadratic schedule
             steps = torch.linspace(0, 1, diff_steps)
@@ -120,7 +123,7 @@ class UNet(nn.Module):
 
     def __init__(self, input_channels: int, dropout_prob: float, embedding_dim: int, base_channels: int) -> None:
         """Initialize UNet with input and base channel sizes. The `input_channels` parameter
-        specifies the # of independent features (timeseries) in the input data"""
+        specifies the # of parallel features we have at each timestep"""
         super().__init__()
 
         self.dropout_prob  = dropout_prob
@@ -146,9 +149,9 @@ class UNet(nn.Module):
             nn.Linear(c3, c3),)
 
         # Upsampling layers
-        self.up1 = self._conv_block(c3 + c2, c2)
-        self.up2 = self._conv_block(c2 + c1, c1)
-        self.output = nn.Conv1d(c1, input_channels, kernel_size=self.OUTPUT_KERNEL)
+        self.up1   = self._conv_block(c3 + c2, c2)
+        self.up2   = self._conv_block(c2 + c1, c1)
+        self.output= nn.Conv1d(c1, input_channels, kernel_size=self.OUTPUT_KERNEL)
 
 
     def _conv_block(self, in_channels: int, out_channels: int) -> nn.Sequential:
@@ -191,22 +194,24 @@ class UNet(nn.Module):
         x3 = self.down3(x2)       # → (B, c3, L)
 
         # time-step embedding
-        emb = get_timestep_embedding(t, self.embedding_dim)  # (B, emb)
-        emb = self.time_mlp(emb)[..., None]                 # (B, c3, 1)
+        t_emb = get_timestep_embedding(t, self.embedding_dim)  # (B, emb)
+        t_emb = self.time_mlp(t_emb)[..., None]                 # (B, c3, 1)
         
         # Add time embedding to the bottleneck layer output
-        x3 = x3 + emb # broadcast → (B, c3, L)
+        x3 = x3 + t_emb
 
         # Bottleneck
         x3 = self.bottleneck(x3)      # (batch, 256, seq_len)
 
         # decode
         u1 = F.interpolate(x3, scale_factor=2, mode='nearest')
-        u1 = torch.cat([u1, x2], dim=1)
+        x2_resized = F.interpolate(x2, size=u1.shape[2:], mode='nearest')
+        u1 = torch.cat([u1, x2_resized], dim=1)
         u1 = self.up1(u1)          # → (B, c2, 2L)
 
         u2 = F.interpolate(u1, scale_factor=2, mode='nearest')
-        u2 = torch.cat([u2, x1], dim=1)
+        x1_resized = F.interpolate(x1, size=u2.shape[2:], mode='nearest')
+        u2 = torch.cat([u2, x1_resized], dim=1)
         u2 = self.up2(u2)          # → (B, c1, 4L)
         return self.output(u2)
 
@@ -219,101 +224,103 @@ def get_timestep_embedding(timesteps: torch.Tensor, embedding_dim: int) -> torch
     Motivation:
         The constant `10000.0` is a scaling factor ensuring a range of frequencies in the embedding, derived from the original Transformer architecture. It balances high- and low-frequency signals for effective time-step representation"""
 
-    half = embedding_dim // 2
-    freq = torch.exp(-torch.arange(half, device=timesteps.device) * (math.log(10000) / (half - 1)))
-    emb  = timesteps[:, None].float() * freq[None]
-    emb  = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
-    if embedding_dim % 2: emb = F.pad(emb, (0,1))
+    half_dim  = embedding_dim // 2
+    exponent  = -math.log(10000) / (half_dim - 1)
+    exponents = torch.exp(torch.arange(half_dim, device=timesteps.device) * exponent)
+    emb = timesteps[:, None].float() * exponents[None, :]
+    emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)
+    if embedding_dim % 2 == 1:
+        emb = F.pad(emb, (0, 1))  # Ensure dimension match    return emb
     return emb
 
-# def _prepare_batch(batch: Tuple[torch.Tensor, ...], device: torch.device, num_channels: int) -> torch.Tensor:
-#     """Prepares a batch of data for training/validation"""
-#     x_0 = batch[0].to(device)
-#     if x_0.ndim == 2:
-#         x_0 = x_0.unsqueeze(-1)  # [B, num_features, 1]
-#     elif x_0.ndim == 3 and x_0.shape[1] != num_channels:
-#         x_0 = x_0.permute(0, 2, 1)  # [B, 1, L] -> [B, C, L]
-#     return x_0
-def _prepare_batch(batch: Tuple[torch.Tensor, ...], device: torch.device, num_channels: int) -> torch.Tensor:
-    """Prepares a batch of data for training/validation"""
-    x_0 = batch[0].to(device)
-    return x_0
 
-def _train_epoch(model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, betas: torch.Tensor,
-                 diffusion_steps: int, device: torch.device, num_channels: int,) -> float:
-    """Performs 1 training epoch"""
+class TrainDiffusion:
+    def _prepare_batch(self, batch: Tuple[torch.Tensor, ...], device: torch.device, num_channels: int) -> torch.Tensor:
+        """Prepares a batch of data for training/validation"""
+        x_0 = batch[0].to(device)
+        # if x_0.ndim == 2:
+        #     x_0 = x_0.unsqueeze(-1)  # [B, num_features, 1]
+        # elif x_0.ndim == 3 and x_0.shape[1] != num_channels:
+        #     x_0 = x_0.permute(0, 2, 1)  # [B, 1, L] -> [B, C, L]
+        return x_0
 
-    model.train()
-    total_loss = 0.0
+    def _train_epoch(self, model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, betas: torch.Tensor,
+                    diffusion_steps: int, device: torch.device, num_channels: int,) -> float:
+        """Performs 1 training epoch"""
 
-    for batch in train_loader:
-        x_0 = _prepare_batch(batch, device, num_channels)
-        t   = torch.randint(0, diffusion_steps, (x_0.size(0),), device=device)
-        x_t, true_noise = Diffusion.forward_diffusion(x_0, t, betas)
-        predicted_noise = model(x_t, t)
-        loss = compute_mse_loss(predicted_noise, true_noise)
+        model.train()
+        total_loss = 0.0
 
-        optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # prevents exploding gradients
-        optimizer.step()
-
-        total_loss += loss.item() * x_0.size(0)
-    return total_loss / len(train_loader.dataset)
-
-def _validation_epoch(model: nn.Module, validation_loader: DataLoader, betas: torch.Tensor,
-                      diffusion_steps: int, device: torch.device, num_channels: int,) -> float:
-    """Performs 1 validation epoch"""
-
-    model.eval()
-    val_loss = 0.0
-    with torch.no_grad():
-        for batch in validation_loader:
-            x_0 = _prepare_batch(batch, device, num_channels)
+        for batch in train_loader:
+            x_0 = self._prepare_batch(batch, device, num_channels)
             t   = torch.randint(0, diffusion_steps, (x_0.size(0),), device=device)
             x_t, true_noise = Diffusion.forward_diffusion(x_0, t, betas)
+            if x_t is None:
+                raise ValueError("x_t is None, cannot proceed with forward pass.")
             predicted_noise = model(x_t, t)
-            val_loss += compute_mse_loss(predicted_noise, true_noise).item() * x_0.size(0)
-    return val_loss / len(validation_loader.dataset)
+            loss = compute_mse_loss(predicted_noise, true_noise)
 
-def train_diffusion(device: torch.device, model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, scheduler, betas: torch.Tensor,
-                    diffusion_steps: int, epochs: int, validation_loader: DataLoader = None, patience: int = 5) -> None:
-    """Trains diffusion model with given training dataset, and optional validation dataset (and avg loss
-    over validation dataset). We also add early stopping. Args:
-        - model (nn.Module): The diffusion model to be trained
-        - train_loader (DataLoader): DataLoader for the training dataset
-        - optimizer (optim.Optimizer): Optimizer for model parameters
-        - betas (torch.Tensor): Noise schedule for the forward diffusion process
-        - diffusion_steps (int): Number of diffusion steps for the process
-        - epochs (int): Number of training epochs
-        - validation_loader (DataLoader, optional): DataLoader for the validation dataset. Defaults to None
-        - patience (int, optional): Number of epochs to wait before early stopping if validation loss doesn't improve. Defaults to 5
-        - output (None): function performs in-place training and prints training progress"""
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # prevents exploding gradients
+            optimizer.step()
 
-    model.to(device)
-    best_val_loss    = float('inf')
-    patience_counter = 0
+            total_loss += loss.item() * x_0.size(0)
+        return total_loss / len(train_loader.dataset)
 
-    num_channels = model.output.in_channels if hasattr(model, 'output') and hasattr(model.output, 'in_channels') else model.down1[0].in_channels
+    def _validation_epoch(self, model: nn.Module, validation_loader: DataLoader, betas: torch.Tensor,
+                        diffusion_steps: int, device: torch.device, num_channels: int,) -> float:
+        """Performs 1 validation epoch"""
 
-    for epoch in range(epochs):
-        avg_loss = _train_epoch(model, train_loader, optimizer, betas, diffusion_steps, device, num_channels)
-        print(f"Epoch [{epoch+1}/{epochs}], loss: {avg_loss:.4f}", end="")
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for batch in validation_loader:
+                x_0 = self._prepare_batch(batch, device, num_channels)
+                t   = torch.randint(0, diffusion_steps, (x_0.size(0),), device=device)
+                x_t, true_noise = Diffusion.forward_diffusion(x_0, t, betas)
+                predicted_noise = model(x_t, t)
+                val_loss += compute_mse_loss(predicted_noise, true_noise).item() * x_0.size(0)
+        return val_loss / len(validation_loader.dataset)
 
-        if validation_loader:
-            avg_val_loss = _validation_epoch(model, validation_loader, betas, diffusion_steps, device, num_channels)
-            print(f", Validation loss: {avg_val_loss:.4f}")
+    def train_diffusion(self, device: torch.device, model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, scheduler, betas: torch.Tensor,
+                        diffusion_steps: int, epochs: int, validation_loader: DataLoader = None, patience: int = 5) -> None:
+        """Trains diffusion model with given training dataset, and optional validation dataset (and avg loss
+        over validation dataset). We also add early stopping. Args:
+            - model (nn.Module): The diffusion model to be trained
+            - train_loader (DataLoader): DataLoader for the training dataset
+            - optimizer (optim.Optimizer): Optimizer for model parameters
+            - betas (torch.Tensor): Noise schedule for the forward diffusion process
+            - diffusion_steps (int): Number of diffusion steps for the process
+            - epochs (int): Number of training epochs
+            - validation_loader (DataLoader, optional): DataLoader for the validation dataset. Defaults to None
+            - patience (int, optional): Number of epochs to wait before early stopping if validation loss doesn't improve. Defaults to 5
+            - output (None): function performs in-place training and prints training progress"""
 
-            if avg_val_loss   < best_val_loss:
-                best_val_loss = avg_val_loss
-                patience_counter = 0
-            else:
-                patience_counter += 1
-                # print(f"Patience: {patience_counter}/{patience}")
-                if patience_counter >= patience:
-                    print("Early stopping triggered!")
-                    break
-        scheduler.step()
+        model.to(device)
+        best_val_loss    = float('inf')
+        patience_counter = 0
+
+        num_channels = model.output.in_channels if hasattr(model, 'output') and hasattr(model.output, 'in_channels') else model.down1[0].in_channels
+
+        for epoch in range(epochs):
+            avg_loss = self._train_epoch(model, train_loader, optimizer, betas, diffusion_steps, device, num_channels)
+            print(f"Epoch [{epoch+1}/{epochs}], loss: {avg_loss:.4f}", end="")
+
+            if validation_loader:
+                avg_val_loss = self._validation_epoch(model, validation_loader, betas, diffusion_steps, device, num_channels)
+                print(f", Validation loss: {avg_val_loss:.4f}")
+
+                if avg_val_loss   < best_val_loss:
+                    best_val_loss = avg_val_loss
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                    if patience_counter >= patience:
+                        print("Early stopping triggered!")
+                        break
+            scheduler.step()
+            # scheduler.step(avg_val_loss)
 
 
 def train_multi_client_diffusion_ldm(client_data_list, client_feature_counts, autoencoder_list, diffusion_model,
@@ -347,9 +354,10 @@ def sample_new_data(model: nn.Module, betas: torch.Tensor, diff_steps: int, shap
         - output (torch.Tensor): generated sample after reversing the diffusion process"""
 
     x_t = torch.randn(shape).to(device)
-    for _ in reversed(range(diff_steps)):
+    for t in reversed(range(diff_steps)):
         x_t = Diffusion.reverse_diffusion(model, x_t, betas, diff_steps)
     return x_t
+
 
 
 # TODO: options to improve the diffusion model:
