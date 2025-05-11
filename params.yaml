@@ -1,12 +1,12 @@
 dataset:
-  filename:          "energy_data.csv"
+  filename:           "energy_data.csv"
   train_valid_split:  0.8  # 80% training 20% validation
 
 autoencoder_design:
-  hidden_dim:         22   # layer 1 nodes
-  encoding_dim:       10   # layer 2 nodes
-  latent_dim:         6    # latent layer nodes
-  dropout_prob:       0.15 # probability of dropping units during training
+  hidden_dim:         22        # layer 1 nodes
+  encoding_dim:       10        # layer 2 nodes
+  latent_dim:         6         # latent layer nodes
+  dropout_prob:       0.15      # probability of dropping units during training
 
 autoencoder_training:
   batch_size:         32        # number of samples per batch
@@ -19,7 +19,7 @@ autoencoder_training:
   scheduler_factor:   0.8       # multiplies lr by this factor when validation loss plateaus
 
 diffusion_design:
-  diff_steps:         10       # num of diffusion steps
+  diff_steps:         50        # num of diffusion steps
 
 diff_noise_scheduler:
   noise_profile:      'l'       # l = linear, c = cos, q = quadratic
@@ -28,7 +28,7 @@ diff_noise_scheduler:
   end_noise_val:      0.01      # end noise value
 
 diffusion_training:
-  batch_size:         1024       # number of samples per batch (into dataloader)
+  batch_size:         512      # number of samples per batch (into dataloader)
   train_epochs:       200       # num of diffusion training epochs
   training_patience:  300       # how many epochs with no improvement to stop training
   optimizer_lr:       0.005     # learning rate for the optimizer
@@ -39,5 +39,5 @@ diffusion_training:
 
 Unet_design:
   dropout_prob:       0.1  # probability of dropping units during training
-  base_channels:      18   # number of filters in 1st Unet layer
+  base_channels:      28   # number of filters in 1st Unet layer (should NOT exceed # of dataset features)
   embedding_dim:      128  # time-step embedding size

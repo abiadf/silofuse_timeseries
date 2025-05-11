@@ -90,88 +90,88 @@ class Autoencoder(nn.Module):
         x_reconstructed = x_reconstructed + x_input
         return x_reconstructed
 
-
     # ====================
     def encode_to_latent(self, x_input: torch.Tensor) -> torch.Tensor:
-        """[LDM] Encodes the input into the latent space."""
+        """[for LDM] Encodes the input into the latent space"""
         x_input  = x_input.to(device)
         z_latent = self.encoder(x_input)
         return z_latent
 
     def decode_from_latent(self, z_latent: torch.Tensor) -> torch.Tensor:
-        """[LDM] Decodes the latent representation back to the data space."""
+        """[for LDM] Decodes the latent representation back to the data space"""
         z_latent        = z_latent.to(device)
         x_reconstructed = self.decoder(z_latent)
         return x_reconstructed
 
     def forward_latent(self, x_input: torch.Tensor) -> torch.Tensor:
-        """[LDM] Combined encode and decode (for standard autoencoder training)."""
+        """[for LDM] Combined encode and decode (for standard autoencoder training)"""
         latent        = self.encode_to_latent(x_input)
         reconstructed = self.decode_from_latent(latent)
         return reconstructed
 
 
-
-def _train_epoch(device: torch.device, autoencoder: Autoencoder, train_loader: DataLoader, optimizer: optim.Optimizer) -> float:
-    autoencoder.train()  # set to train mode
-    epoch_loss = 0
-    for data in train_loader:
-        x_input, _ = data
-        x_input    = x_input.to(device)
-        optimizer.zero_grad()
-        x_reconstructed = autoencoder(x_input)
-        loss = compute_reconstruction_loss(x_input, x_reconstructed)
-        loss.backward()
-        optimizer.step()
-        epoch_loss += loss.item()
-    return epoch_loss / len(train_loader)
-
-def _validation_epoch(device: torch.device, autoencoder: Autoencoder, validation_loader: DataLoader) -> float:
-    autoencoder.eval()
-    val_loss_total = 0
-    with torch.no_grad(): # disables gradient tracking
-        for data in validation_loader:
+class TrainAutoencoder:
+    """Class dealing with training the autoencoder, measured by the loss"""
+    def _train_epoch(self, device: torch.device, autoencoder: Autoencoder, train_loader: DataLoader, optimizer: optim.Optimizer) -> float:
+        autoencoder.train()  # set to train mode
+        epoch_loss = 0
+        for data in train_loader:
             x_input, _ = data
             x_input    = x_input.to(device)
+            optimizer.zero_grad()
             x_reconstructed = autoencoder(x_input)
-            validation_loss = compute_reconstruction_loss(x_input, x_reconstructed)
-            val_loss_total += validation_loss.item()
-    return val_loss_total / len(validation_loader)
+            loss = compute_reconstruction_loss(x_input, x_reconstructed)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+        return epoch_loss / len(train_loader)
 
-def train_autoencoder(device: torch.device, autoencoder: Autoencoder, epochs: int, train_loader: DataLoader,
-                      optimizer: optim.Optimizer, scheduler, validation_loader: DataLoader = None, patience: int = 5) -> None:
-    """Trains the autoencoder for a specified # of epochs, with optional early stopping. A separate validation dataset, not used during training, is used to evaluate the model’s performance during training, helping to monitor the model’s ability to generalize and avoid overfitting. Args:
-        - autoencoder (Autoencoder): An instance of the Autoencoder class to train.
-        - epochs (int): Number of training epochs
-        - x_input (torch.Tensor): The input data tensor
-        - optimizer (torch.optim.Optimizer): The optimizer to use for training
-        - validation_input (torch.Tensor): Optional validation data (same shape as x_input)
-        - patience (int): Early stopping patience in epochs"""
+    def _validation_epoch(self, device: torch.device, autoencoder: Autoencoder, validation_loader: DataLoader) -> float:
+        autoencoder.eval()
+        val_loss_total = 0
+        with torch.no_grad(): # disables gradient tracking
+            for data in validation_loader:
+                x_input, _      = data
+                x_input         = x_input.to(device)
+                x_reconstructed = autoencoder(x_input)
+                validation_loss = compute_reconstruction_loss(x_input, x_reconstructed)
+                val_loss_total += validation_loss.item()
+        return val_loss_total / len(validation_loader)
 
-    autoencoder.to(device)
-    best_loss         = float('inf')
-    epochs_no_improve = 0
+    def train_autoencoder(self, device: torch.device, autoencoder: Autoencoder, epochs: int, train_loader: DataLoader,
+                        optimizer: optim.Optimizer, scheduler, validation_loader: DataLoader = None, patience: int = 5) -> None:
+        """Trains the autoencoder for a specified # of epochs, with optional early stopping. A separate validation dataset, not used during training, is used to evaluate the model’s performance during training, helping to monitor the model’s ability to generalize and avoid overfitting. Args:
+            - autoencoder (Autoencoder): An instance of the Autoencoder class to train.
+            - epochs (int): Number of training epochs
+            - x_input (torch.Tensor): The input data tensor
+            - optimizer (torch.optim.Optimizer): The optimizer to use for training
+            - validation_input (torch.Tensor): Optional validation data (same shape as x_input)
+            - patience (int): Early stopping patience in epochs"""
 
-    for epoch in range(epochs):
-        avg_epoch_loss = _train_epoch(device, autoencoder, train_loader, optimizer)
-        print(f'Epoch [{epoch+1}/{epochs}], training loss: {avg_epoch_loss:.4f}')
+        autoencoder.to(device)
+        best_loss         = float('inf')
+        epochs_no_improve = 0
 
-        # Early stopping logic (if validation_loader is provided)
-        if validation_loader is not None:
-            avg_val_loss = _validation_epoch(device, autoencoder, validation_loader)
-            print(f'Validation loss: {avg_val_loss:.4f}')
+        for epoch in range(epochs):
+            avg_epoch_loss = self._train_epoch(device, autoencoder, train_loader, optimizer)
+            print(f'Epoch [{epoch+1}/{epochs}], training loss: {avg_epoch_loss:.4f}')
 
-            scheduler.step(avg_val_loss)
+            # Early stopping logic (if validation_loader is provided)
+            if validation_loader is not None:
+                avg_val_loss = self._validation_epoch(device, autoencoder, validation_loader)
+                print(f'Validation loss: {avg_val_loss:.4f}')
 
-            if avg_val_loss < best_loss:
-                best_loss        = avg_val_loss
-                epochs_no_improve= 0
-            else:
-                epochs_no_improve += 1
-            if epochs_no_improve  >= patience:
-                print("Early stopping triggered")
-                break
-    autoencoder.eval()
+                scheduler.step(avg_val_loss)
+
+                if avg_val_loss < best_loss:
+                    best_loss        = avg_val_loss
+                    epochs_no_improve= 0
+                else:
+                    epochs_no_improve += 1
+                if epochs_no_improve  >= patience:
+                    print("Early stopping triggered")
+                    break
+        autoencoder.eval()
 
 
 # TODO to improve AE design
