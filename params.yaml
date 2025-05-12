@@ -19,7 +19,7 @@ autoencoder_training:
   scheduler_factor:   0.8       # multiplies lr by this factor when validation loss plateaus
 
 diffusion_design:
-  diff_steps:         50        # num of diffusion steps
+  diff_steps:         200       # num of diffusion steps
 
 diff_noise_scheduler:
   noise_profile:      'l'       # l = linear, c = cos, q = quadratic
@@ -38,6 +38,6 @@ diffusion_training:
   scheduler_factor:   0.5       # multiplies lr by this factor when validation loss plateaus
 
 Unet_design:
-  dropout_prob:       0.1  # probability of dropping units during training
+  dropout_prob:       0.  # probability of dropping units during training
   base_channels:      28   # number of filters in 1st Unet layer (should NOT exceed # of dataset features)
   embedding_dim:      128  # time-step embedding size

@@ -32,7 +32,7 @@ class DiffusionUtils():
 
     @staticmethod
     def reverse_diffusion(model: Callable[[Tensor, int], Tensor], x_t: Tensor,
-                          betas: Sequence[float], diff_steps: int, DDPM_or_not: bool = True) -> Tensor:
+                          betas: Sequence[float], diff_steps: int, DDPM_or_not: bool) -> Tensor:
         """Reverse diffusion (denoising) using a trained model, and DDPM (full posterior mean + stochastic noise) or DDIM
         - model (Callable): model that predicts noise given (x_t, t)
         - x_t (Tensor): noised input at timestep `diff_steps`
@@ -110,6 +110,7 @@ class DiffusionUtils():
 # add temporal attention (or give them different weights) to focus on important timesteps
 # add multi-input layer to account for multivariate timeseries
 # use right loss function; MSE for timeseries regression, crossentropyloss for classification
+
 class UNet(nn.Module):
     """UNet NN MODEL that learns to predict noise. For 1D, contains skip connections, downsampling, and upsampling
     NOTE: used torch functions tailored to timeseries (1D), 1d is in their name"""
@@ -118,7 +119,7 @@ class UNet(nn.Module):
     PADDING        = 1 # Padding for same-size output
     OUTPUT_KERNEL  = 1 # Final conv kernel size
     CAT_DIM        = 1 # Channel dim for skip connections
-    UPSAMPLE_SCALE = 4 # Pooling/upsample scale
+    UPSAMPLE_SCALE = 2 # Pooling/upsample scale
     CHANNEL_MUL    = 2 # Channel scaling factor
 
     def __init__(self, input_channels: int, dropout_prob: float, embedding_dim: int, base_channels: int) -> None:
@@ -154,7 +155,6 @@ class UNet(nn.Module):
         self.up2   = self._conv_block(c2 + c1, c1)
         self.output= nn.Conv1d(c1, input_channels, kernel_size=self.OUTPUT_KERNEL)
 
-
     def _conv_block(self, in_channels: int, out_channels: int) -> nn.Sequential:
         """Returns 2-layer convolutional block for 1D timeseries data. This block consists of
         2 consecutive convolutional layers, each followed by BatchNorm, ReLU activation, and
@@ -168,15 +168,16 @@ class UNet(nn.Module):
             nn.Conv1d(in_channels, out_channels, kernel_size=self.KERNEL_SIZE, padding=self.PADDING),
             # nn.BatchNorm1d(out_channels),
             nn.GroupNorm(14, out_channels), #try this instead of batchnorm
-            nn.ReLU(),
+            # nn.ReLU(),
+            nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
             nn.Dropout(self.dropout_prob),
             nn.Conv1d(out_channels, out_channels, kernel_size=self.KERNEL_SIZE, padding=self.PADDING),
             # nn.BatchNorm1d(out_channels),
             nn.GroupNorm(14, out_channels), #try this instead of batchnorm
-            nn.ReLU(),
+            # nn.ReLU(),
+            nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
             nn.Dropout(self.dropout_prob),)
         return conv_block_module
-
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Forward pass through the UNet architecture for denoising; this method implements the
@@ -323,7 +324,7 @@ class TrainDiffusion:
                 # scheduler.step(avg_val_loss)
 
         except KeyboardInterrupt:
-            print("\nTraining interrupted by user.")
+            print("\nTraining interrupted by user")
 
         return train_losses
 
@@ -378,7 +379,7 @@ def sample_new_data(model: nn.Module, betas: torch.Tensor, diff_steps: int, shap
 
     x_t = torch.randn(shape).to(device)
     for _ in reversed(range(diff_steps)):
-        x_t = DiffusionUtils.reverse_diffusion(model, x_t, betas, diff_steps)
+        x_t = DiffusionUtils.reverse_diffusion(model, x_t, betas, diff_steps, False)
     return x_t
 
 
