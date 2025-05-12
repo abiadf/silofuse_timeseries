@@ -6,8 +6,10 @@ numpy
 pandas
 scikit-learn
 # seaborn
+statsmodels
 # tensorflow
 torch
+tslearn
 # wandb
 PyYAML
 polars
