@@ -8,6 +8,17 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from typing import Callable, Sequence, Tuple
 from utils import compute_mse_loss
+import wandb
+
+wandb.init(project="silofusion", entity="fabiad")
+
+wandb.config.update({
+    "batch_size": 1,#train_loader.batch_size,
+    "learning_rate": 1,#optimizer.param_groups[0]['lr'],
+    "num_epochs": 1,#epochs,
+    "diffusion_steps": 1,#diffusion_steps,
+    "model_type": "UNet", # Example, change based on your model type
+})
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -25,7 +36,8 @@ class DiffusionUtils():
         device      = x_0.device
         alphas      = 1. - betas
         alpha_bars  = torch.cumprod(alphas, dim=0).to(x_0.device)
-        alpha_bar_t = alpha_bars[t].reshape(-1, 1, 1)  # (batch, 1, 1) for correct broadcasting
+        # alpha_bar_t = alpha_bars[t].reshape(-1, 1, 1)  # (batch, 1, 1) for correct broadcasting
+        alpha_bar_t = alpha_bars.gather(0, t).reshape(-1, 1, 1)
         noise       = torch.randn_like(x_0).to(x_0.device)
         x_t         = torch.sqrt(alpha_bar_t) * x_0 + torch.sqrt(1 - alpha_bar_t) * noise
         return x_t, noise
@@ -68,7 +80,8 @@ class DiffusionUtils():
                 noise_pred = noise_pred[..., :x_t.shape[-1]]
 
             coef1 = 1 / alpha_t.sqrt()
-            coef2 = (1 - alpha_t) / (1 - alpha_bar_t).sqrt()
+            # coef2 = (1 - alpha_t) / torch.sqrt(1 - alpha_bar_t)
+            coef2 = (1 - alpha_t) / torch.sqrt((1 - alpha_bar_t).clamp(min=1e-5))
             mean  = coef1 * (x_t - coef2 * noise_pred)
 
             if t > 0 and DDPM_or_not:
@@ -84,7 +97,7 @@ class DiffusionUtils():
 
     @staticmethod
     def get_noise_schedule(start_val: float, end_val: float, diff_steps: int,
-                           cos_start_offset: float, noise_profile: str = 'l') -> torch.Tensor:
+                           cos_start_offset: float, device, noise_profile: str = 'l') -> torch.Tensor:
         """Generate a noise schedule (linear, cosine, quadratic) given start/end values and number of steps"""
         
         if noise_profile == 'l': # linear schedule
@@ -95,7 +108,7 @@ class DiffusionUtils():
             f      = lambda t: torch.cos((t * 0.5 + offset) * torch.pi) ** 2
             alphas_bar = f(steps) / f(torch.tensor(0.0, dtype=steps.dtype, device=steps.device))  # Compute cumulative product
             betas  = 1 - (alphas_bar[1:] / alphas_bar[:-1])
-            betas  = betas.clamp(min=1e-5, max=0.02)  # Much safer max
+            betas  = betas.clamp(min=1e-5, max=0.1)  # Much safer max
             return betas
         elif noise_profile == 'q': # quadratic schedule
             steps = torch.linspace(0, 1, diff_steps)
@@ -105,8 +118,7 @@ class DiffusionUtils():
             raise ValueError(f"Unknown noise profile: {noise_profile}")
 
 
-# TODO: change bottleneck line from `self.CHANNEL_MUL**2` to *2
-# consider larger or non-square `UPSAMPLE_SCALE`
+# TODO: consider larger or non-square `UPSAMPLE_SCALE`
 # add temporal attention (or give them different weights) to focus on important timesteps
 # add multi-input layer to account for multivariate timeseries
 # use right loss function; MSE for timeseries regression, crossentropyloss for classification
@@ -116,7 +128,7 @@ class UNet(nn.Module):
     NOTE: used torch functions tailored to timeseries (1D), 1d is in their name"""
 
     KERNEL_SIZE    = 3 # Convolution layer kernel size
-    PADDING        = 1 # Padding for same-size output
+    PADDING        = KERNEL_SIZE//2 # Padding for same-size output
     OUTPUT_KERNEL  = 1 # Final conv kernel size
     CAT_DIM        = 1 # Channel dim for skip connections
     UPSAMPLE_SCALE = 2 # Pooling/upsample scale
@@ -133,8 +145,8 @@ class UNet(nn.Module):
 
         # derive widths
         c1 = base_channels
-        c2 = base_channels * 2
-        c3 = base_channels * 2
+        c2 = base_channels * self.CHANNEL_MUL
+        c3 = base_channels * self.CHANNEL_MUL
 
         # encoder
         self.down1 = self._conv_block(input_channels, c1)
@@ -167,15 +179,15 @@ class UNet(nn.Module):
         conv_block_module = nn.Sequential(
             nn.Conv1d(in_channels, out_channels, kernel_size=self.KERNEL_SIZE, padding=self.PADDING),
             # nn.BatchNorm1d(out_channels),
-            nn.GroupNorm(14, out_channels), #try this instead of batchnorm
+            nn.GroupNorm(num_groups=min(14, out_channels), num_channels=out_channels), # instead of batchnorm, NOTE # of groups must follow (output%channels)=0
             # nn.ReLU(),
-            nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
+            nn.LeakyReLU(negative_slope=0.01), # LeakyReLU instead of ReLU
             nn.Dropout(self.dropout_prob),
             nn.Conv1d(out_channels, out_channels, kernel_size=self.KERNEL_SIZE, padding=self.PADDING),
             # nn.BatchNorm1d(out_channels),
             nn.GroupNorm(14, out_channels), #try this instead of batchnorm
             # nn.ReLU(),
-            nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
+            nn.LeakyReLU(negative_slope=0.01), # LeakyReLU instead of ReLU
             nn.Dropout(self.dropout_prob),)
         return conv_block_module
 
@@ -218,14 +230,17 @@ class UNet(nn.Module):
         x1_resized = F.interpolate(x1, size=u2.shape[2:], mode='linear')
         u2 = torch.cat([u2, x1_resized], dim=1)
         u2 = self.up2(u2) # → (B, c1, 4L)
-        return self.output(u2)
+        out= self.output(u2)
+        out = F.interpolate(out, size=x.shape[-1], mode='linear')  # force size match
+        return out
 
 
 class TrainDiffusion:
     """Training engine, using Diffusion to generate inputs, and UNet to predict added noise"""
 
-    def __init__(self, diffusion: DiffusionUtils):
+    def __init__(self, diffusion: DiffusionUtils, debug: bool = False):
         self.diffusion = diffusion
+        self.debug     = debug
 
     def _prepare_batch(self, batch: Tuple[torch.Tensor, ...], device: torch.device, num_channels: int) -> torch.Tensor:
         """Prepares a batch of data for training/validation"""
@@ -246,13 +261,26 @@ class TrainDiffusion:
             x_0 = self._prepare_batch(batch, device, num_channels)
             t   = torch.randint(0, diffusion_steps, (x_0.size(0),), device=device)
             x_t, true_noise = self.diffusion.forward_diffusion(x_0, t, betas)
+
             if x_t is None:
                 raise ValueError("x_t is None, cannot proceed with forward pass.")
+
             predicted_noise = model(x_t, t)
             loss = compute_mse_loss(predicted_noise, true_noise)
 
+            if torch.isnan(loss):
+                raise ValueError("NaN loss detected. Check model output and noise schedule.")
+
             optimizer.zero_grad(set_to_none=True) # set_to_none makes it faster
             loss.backward()
+
+            for name, param in model.named_parameters():
+                # if self.debug and param.grad is not None:
+                #     print(f"{name}: grad mean={param.grad.mean():.6f}, std={param.grad.std():.6f}")
+                if param.grad is not None:
+                    wandb.log({f"{name}_grad_mean": param.grad.mean().item()})
+                    wandb.log({f"{name}_grad_std": param.grad.std().item()})
+
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # prevents exploding gradients
             optimizer.step()
 
@@ -327,6 +355,8 @@ class TrainDiffusion:
             print("\nTraining interrupted by user")
 
         return train_losses
+
+wandb.finish()
 
 
 def get_timestep_embedding(timesteps: torch.Tensor, embedding_dim: int) -> torch.Tensor:

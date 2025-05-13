@@ -10,7 +10,7 @@ statsmodels
 # tensorflow
 torch
 tslearn
-# wandb
+wandb
 PyYAML
 polars
 
