@@ -10,16 +10,6 @@ from typing import Callable, Sequence, Tuple
 from utils import compute_mse_loss
 import wandb
 
-wandb.init(project="silofusion", entity="fabiad")
-
-wandb.config.update({
-    "batch_size": 1,#train_loader.batch_size,
-    "learning_rate": 1,#optimizer.param_groups[0]['lr'],
-    "num_epochs": 1,#epochs,
-    "diffusion_steps": 1,#diffusion_steps,
-    "model_type": "UNet", # Example, change based on your model type
-})
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
@@ -108,7 +98,7 @@ class DiffusionUtils():
             f      = lambda t: torch.cos((t * 0.5 + offset) * torch.pi) ** 2
             alphas_bar = f(steps) / f(torch.tensor(0.0, dtype=steps.dtype, device=steps.device))  # Compute cumulative product
             betas  = 1 - (alphas_bar[1:] / alphas_bar[:-1])
-            betas  = betas.clamp(min=1e-5, max=0.1)  # Much safer max
+            betas  = betas.clamp(min=1e-5, max=0.1) # safer max
             return betas
         elif noise_profile == 'q': # quadratic schedule
             steps = torch.linspace(0, 1, diff_steps)
@@ -122,7 +112,6 @@ class DiffusionUtils():
 # add temporal attention (or give them different weights) to focus on important timesteps
 # add multi-input layer to account for multivariate timeseries
 # use right loss function; MSE for timeseries regression, crossentropyloss for classification
-
 class UNet(nn.Module):
     """UNet NN MODEL that learns to predict noise. For 1D, contains skip connections, downsampling, and upsampling
     NOTE: used torch functions tailored to timeseries (1D), 1d is in their name"""
@@ -247,17 +236,15 @@ class TrainDiffusion:
         x_0 = batch[0].to(device)
         return x_0
 
-    # def _train_epoch(self, model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, betas: torch.Tensor,
-    #                  diffusion_steps: int, device: torch.device, num_channels: int,) -> float:
     def _train_epoch(self, model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, betas: torch.Tensor,
                     diffusion_steps: int, device: torch.device, num_channels: int, alphas: torch.Tensor, alpha_bars: torch.Tensor) -> float:
         """Performs 1 training epoch
         model (nn.Module): Expects model like UNet that predicts noise from (x_t, t)"""
 
         model.train()
-        total_loss = 0.0
+        total_loss = 0
 
-        for batch in train_loader:
+        for i, batch in enumerate(train_loader):
             x_0 = self._prepare_batch(batch, device, num_channels)
             t   = torch.randint(0, diffusion_steps, (x_0.size(0),), device=device)
             x_t, true_noise = self.diffusion.forward_diffusion(x_0, t, betas)
@@ -274,28 +261,35 @@ class TrainDiffusion:
             optimizer.zero_grad(set_to_none=True) # set_to_none makes it faster
             loss.backward()
 
+            total_grad_norm      = 0
+            num_params_with_grad = 0
             for name, param in model.named_parameters():
-                # if self.debug and param.grad is not None:
-                #     print(f"{name}: grad mean={param.grad.mean():.6f}, std={param.grad.std():.6f}")
                 if param.grad is not None:
-                    wandb.log({f"{name}_grad_mean": param.grad.mean().item()})
-                    wandb.log({f"{name}_grad_std": param.grad.std().item()})
+                    total_grad_norm += param.grad.norm().item() ** 2
+                    num_params_with_grad += 1
 
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # prevents exploding gradients
+            if num_params_with_grad > 0:
+                avg_grad_norm = (total_grad_norm / num_params_with_grad) ** 0.5
+                wandb.log({"avg_grad_norm": avg_grad_norm})
+
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # prevents exploding gradients
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
             optimizer.step()
 
             total_loss += loss.item() * x_0.size(0)
-        return total_loss / len(train_loader.dataset)
+            wandb.log({"batch_loss": loss.item()}) # loss for each batch
 
-    # def _validation_epoch(self, model: nn.Module, validation_loader: DataLoader, betas: torch.Tensor,
-    #                     diffusion_steps: int, device: torch.device, num_channels: int,) -> float:
+        avg_loss = total_loss / len(train_loader.dataset)
+        # print(f"Epoch ?, loss: {avg_loss:.4f}")
+        return avg_loss
+
     def _validation_epoch(self, model: nn.Module, validation_loader: DataLoader, betas: torch.Tensor,
                             diffusion_steps: int, device: torch.device, num_channels: int,
                             alphas: torch.Tensor, alpha_bars: torch.Tensor) -> float: # Accept alphas and alpha_bars
         """Performs 1 validation epoch"""
 
         model.eval()
-        val_loss = 0.0
+        val_loss = 0
         with torch.no_grad():
             for batch in validation_loader:
                 x_0 = self._prepare_batch(batch, device, num_channels)
@@ -305,8 +299,6 @@ class TrainDiffusion:
                 val_loss += compute_mse_loss(predicted_noise, true_noise).item() * x_0.size(0)
         return val_loss / len(validation_loader.dataset)
 
-    # def train_diffusion(self, device: torch.device, model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, scheduler, betas: torch.Tensor,
-    #                     diffusion_steps: int, epochs: int, validation_loader: DataLoader = None, patience: int = 5) -> None:
     def train_diffusion(self, device: torch.device, model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, scheduler, betas: torch.Tensor,
                         diffusion_steps: int, epochs: int, validation_loader: DataLoader = None, patience: int = 5,
                         alphas: torch.Tensor = None, alpha_bars: torch.Tensor = None) -> None:
@@ -322,24 +314,28 @@ class TrainDiffusion:
         - patience (int, optional): Number of epochs to wait before early stopping if validation loss doesn't improve. Defaults to 5
         - output (None): function performs in-place training and prints training progress"""
 
+        wandb.init(project="silofusion", entity="fabiad")
+        wandb.config.update({
+            "batch_size": 1,#train_loader.batch_size,
+            "learning_rate": 1,#optimizer.param_groups[0]['lr'],
+            "num_epochs": 1,#epochs,
+            "diffusion_steps": 1,#diffusion_steps,
+            "model_type": "UNet", # Example, change based on your model type
+        })
+
         model.to(device)
         best_val_loss    = float('inf')
         patience_counter = 0
         num_channels     = model.output.in_channels if hasattr(model, 'output') and hasattr(model.output, 'in_channels') else model.down1[0].in_channels
-        train_losses = []
 
         try:
             for epoch in range(epochs):
-                # avg_loss = self._train_epoch(model, train_loader, optimizer, betas, diffusion_steps, device, num_channels)
                 avg_loss = self._train_epoch(model, train_loader, optimizer, betas, diffusion_steps, device, num_channels, alphas, alpha_bars)
-
-                print(f"Epoch [{epoch+1}/{epochs}], loss: {avg_loss:.4f}", end="")
+                wandb.log({"epoch_loss": avg_loss, "epoch": epoch + 1}) # Log average loss per epoch
 
                 if validation_loader:
-                    # avg_val_loss = self._validation_epoch(model, validation_loader, betas, diffusion_steps, device, num_channels)
                     avg_val_loss = self._validation_epoch(model, validation_loader, betas, diffusion_steps, device, num_channels, alphas, alpha_bars)
-                    train_losses.append(avg_loss)
-                    print(f", Validation loss: {avg_val_loss:.4f}")
+                    wandb.log({"val_loss": avg_val_loss, "epoch": epoch + 1})
                     if avg_val_loss   < best_val_loss:
                         best_val_loss = avg_val_loss
                         patience_counter = 0
@@ -348,15 +344,13 @@ class TrainDiffusion:
                         if patience_counter >= patience:
                             print("Early stopping triggered!")
                             break
-                scheduler.step()
-                # scheduler.step(avg_val_loss)
+                # scheduler.step()
+                scheduler.step(avg_val_loss)
 
         except KeyboardInterrupt:
             print("\nTraining interrupted by user")
-
-        return train_losses
-
-wandb.finish()
+        finally:
+            wandb.finish()
 
 
 def get_timestep_embedding(timesteps: torch.Tensor, embedding_dim: int) -> torch.Tensor:
