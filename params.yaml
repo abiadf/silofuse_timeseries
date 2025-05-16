@@ -19,7 +19,7 @@ autoencoder_training:
   scheduler_factor:   0.8       # multiplies lr by this factor when validation loss plateaus
 
 diffusion_design:
-  diff_steps:         200       # num of diffusion steps per epoch
+  diff_steps:         100       # num of diffusion steps per epoch
 
 diff_noise_scheduler:
   noise_profile:      'l'       # l = linear, c = cos, q = quadratic
@@ -29,7 +29,7 @@ diff_noise_scheduler:
 
 diffusion_training:
   batch_size:         512      # number of samples per batch (into dataloader)
-  train_epochs:       200       # num of diffusion training epochs
+  train_epochs:       100       # num of diffusion training epochs
   training_patience:  300       # how many epochs with no improvement to stop training
   optimizer_lr:       0.005     # learning rate for the optimizer
   weight_decay:       0.00001   # for L2 regularization

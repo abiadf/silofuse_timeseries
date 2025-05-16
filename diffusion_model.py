@@ -76,13 +76,23 @@ class DiffusionUtils():
 
             if t > 0 and DDPM_or_not:
                 noise = torch.randn_like(x_t).to(x_t.device)
-                # Monitor noise std
-                if t % 10 == 0:  # Print every 10th timestep as an example
+                if t % 10 == 0:  # Print every 10th timestep 
                     print(f"Timestep {t}, Noise std: {noise.std().item():.4f}")
                 sigma = beta_t.sqrt()
                 x_t   = mean + sigma * noise
             else:
                 x_t = mean
+
+            if torch.isnan(x_t).any():
+                print(f"NaN detected in x_t at timestep {t} during reverse diffusion!")
+                break
+            if torch.isnan(mean).any():
+                print(f"NaN detected in mean at timestep {t} during reverse diffusion!")
+                break
+            if t > 0 and DDPM_or_not and torch.isnan(noise).any():
+                print(f"NaN detected in noise at timestep {t} during reverse diffusion!")
+                break
+
         return x_t
 
     @staticmethod
@@ -316,12 +326,11 @@ class TrainDiffusion:
 
         wandb.init(project="silofusion", entity="fabiad")
         wandb.config.update({
-            "batch_size": 1,#train_loader.batch_size,
-            "learning_rate": 1,#optimizer.param_groups[0]['lr'],
-            "num_epochs": 1,#epochs,
-            "diffusion_steps": 1,#diffusion_steps,
-            "model_type": "UNet", # Example, change based on your model type
-        })
+            "batch_size":      train_loader.batch_size,
+            "learning_rate":   optimizer.param_groups[0]['lr'],
+            "num_epochs":      epochs,
+            "diffusion_steps": diffusion_steps,
+            "model_type":      "UNet",})
 
         model.to(device)
         best_val_loss    = float('inf')
@@ -337,7 +346,7 @@ class TrainDiffusion:
                     avg_val_loss = self._validation_epoch(model, validation_loader, betas, diffusion_steps, device, num_channels, alphas, alpha_bars)
                     wandb.log({"val_loss": avg_val_loss, "epoch": epoch + 1})
                     if avg_val_loss   < best_val_loss:
-                        best_val_loss = avg_val_loss
+                        best_val_loss    = avg_val_loss
                         patience_counter = 0
                     else:
                         patience_counter += 1
@@ -349,8 +358,26 @@ class TrainDiffusion:
 
         except KeyboardInterrupt:
             print("\nTraining interrupted by user")
-        finally:
-            wandb.finish()
+        # finally:
+        #     wandb.finish()
+
+    def sample_new_data(self, model: nn.Module, betas: torch.Tensor, diff_steps: int, shape: tuple[int, ...], DDPM_or_not) -> Tensor:
+        """Samples new data by reversing the diffusion process, starting from random noise. Args:
+            - model (nn.Module): trained diffusion model used for denoising
+            - betas (torch.Tensor): noise schedule for the diffusion process
+            - diff_steps (int): # of diffusion steps to reverse
+            - shape (tuple[int, ...]): shape of the generated sample (e.g., (batch_size, channels, height, width))
+            - output (torch.Tensor): generated sample after reversing the diffusion process"""
+
+        model.eval()
+        model.to(device)
+        x_t = torch.randn(shape).to(device)
+        for i in reversed(range(diff_steps)):
+            x_t = DiffusionUtils.reverse_diffusion(model, x_t, betas, diff_steps, DDPM_or_not)
+            wandb.log({"generated_sample_t_{}".format(i): wandb.Image(x_t.cpu().numpy())})
+
+        wandb.finish()
+        return x_t
 
 
 def get_timestep_embedding(timesteps: torch.Tensor, embedding_dim: int) -> torch.Tensor:
@@ -393,7 +420,7 @@ def train_multi_client_diffusion_ldm(client_data_list, client_feature_counts, au
                     None, betas, diffusion_steps, num_epochs_diff, num_channels=num_latent_features) # Pass num_latent_features as num_channels
 
 
-def sample_new_data(model: nn.Module, betas: torch.Tensor, diff_steps: int, shape: tuple[int, ...]) -> Tensor:
+def sample_new_data(model: nn.Module, betas: torch.Tensor, diff_steps: int, shape: tuple[int, ...], DDPM_or_not) -> Tensor:
     """Samples new data by reversing the diffusion process, starting from random noise. Args:
         - model (nn.Module): trained diffusion model used for denoising
         - betas (torch.Tensor): noise schedule for the diffusion process
@@ -401,10 +428,16 @@ def sample_new_data(model: nn.Module, betas: torch.Tensor, diff_steps: int, shap
         - shape (tuple[int, ...]): shape of the generated sample (e.g., (batch_size, channels, height, width))
         - output (torch.Tensor): generated sample after reversing the diffusion process"""
 
+    model.eval()
+    model.to(device)
     x_t = torch.randn(shape).to(device)
-    for _ in reversed(range(diff_steps)):
-        x_t = DiffusionUtils.reverse_diffusion(model, x_t, betas, diff_steps, False)
+    for i in reversed(range(diff_steps)):
+        x_t = DiffusionUtils.reverse_diffusion(model, x_t, betas, diff_steps, DDPM_or_not)
+        wandb.log({"generated_sample_t_{}".format(i): wandb.Image(x_t.cpu().numpy())})
+
+    wandb.finish()
     return x_t
+
 
 
 # TODO: options to improve the diffusion model:
