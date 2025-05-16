@@ -374,8 +374,9 @@ class TrainDiffusion:
         x_t = torch.randn(shape).to(device)
         for i in reversed(range(diff_steps)):
             x_t = DiffusionUtils.reverse_diffusion(model, x_t, betas, diff_steps, DDPM_or_not)
-            wandb.log({"generated_sample_t_{}".format(i): wandb.Image(x_t.cpu().numpy())})
 
+        if i == 0:
+            wandb.log({"final_sample": x_t[:,1]}) #for ex, feature idx 1
         wandb.finish()
         return x_t
 
@@ -419,7 +420,7 @@ def train_multi_client_diffusion_ldm(client_data_list, client_feature_counts, au
     TrainDiffusion.train_diffusion(device, diffusion_model, latent_dataloader, optimizer_diffusion,
                     None, betas, diffusion_steps, num_epochs_diff, num_channels=num_latent_features) # Pass num_latent_features as num_channels
 
-
+# moved to training class, to remove
 def sample_new_data(model: nn.Module, betas: torch.Tensor, diff_steps: int, shape: tuple[int, ...], DDPM_or_not) -> Tensor:
     """Samples new data by reversing the diffusion process, starting from random noise. Args:
         - model (nn.Module): trained diffusion model used for denoising

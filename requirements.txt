@@ -1,3 +1,5 @@
+einops
+opt-einsum
 # fastdtw
 jupyter
 ipykernel
