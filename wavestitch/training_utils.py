@@ -12,7 +12,6 @@ from torch import nn, from_numpy
 from torch.utils.data import Dataset, DataLoader
 from SSSDS4_diffusion import SSSDS4Imputer, SSSDS4Weaver
 
-
 class MyDataset(Dataset):
     def __init__(self, inputs):
         self.inputs = inputs
