@@ -1,6 +1,8 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import polars as pl
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -8,8 +10,12 @@ import torch.nn.functional as F
 from scipy.stats import kstest
 from scipy.stats import wasserstein_distance as wasserstein
 from statsmodels.tsa.stattools import acf
-from tslearn.metrics import dtw
+from skdim.id import MLE
+from sklearn.manifold import Isomap
+from sklearn.decomposition import PCA
+from sklearn.manifold import LocallyLinearEmbedding
 
+from tslearn.metrics import dtw
 
 def compute_reconstruction_loss(x_input: torch.Tensor, x_reconstructed: torch.Tensor) -> torch.Tensor:
     """Computes reconstruction loss (MSE) between input and reconstructed output
@@ -22,6 +28,37 @@ def compute_reconstruction_loss(x_input: torch.Tensor, x_reconstructed: torch.Te
 
     # MAE
     return torch.nn.functional.l1_loss(x_reconstructed, x_input)
+
+class dimensionalityEstimator:
+
+    @staticmethod
+    def estimate_dataset_dimensionality(dataset):
+        """Estimate intrinsic dimensionality using scikit-dimension
+        input: dataset (pd or pl df, or np array)
+        output: estimated dataset dimensionality"""
+        if isinstance(dataset, (pd.DataFrame, pl.DataFrame)):
+            X = dataset.to_numpy() if isinstance(dataset, pd.DataFrame) else dataset.to_numpy()
+        elif isinstance(dataset, (np.ndarray,)):
+            X = dataset
+        else:
+            raise TypeError("Unsupported dataset type")
+        return MLE().fit(X).dimension_
+
+    @staticmethod
+    def components_with_variance(dataset, var: float = 0.95):
+        """Finds # of components explaining 95% variance"""
+        pca          = PCA().fit(dataset)
+        explained_variance = pca.explained_variance_ratio_
+        cum_var      = np.cumsum(explained_variance)
+        n_components = np.searchsorted(cum_var, var) + 1
+        return n_components
+    
+    @staticmethod
+    def ok2(dataset):
+        embedding = LocallyLinearEmbedding(n_neighbors=10, n_components=10, method='standard')
+        embedding.fit(dataset)
+        return embedding
+
 
 
 def compute_mse_loss(predicted_noise, true_noise):

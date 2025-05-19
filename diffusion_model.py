@@ -92,7 +92,6 @@ class DiffusionUtils():
             if t > 0 and DDPM_or_not and torch.isnan(noise).any():
                 print(f"NaN detected in noise at timestep {t} during reverse diffusion!")
                 break
-
         return x_t
 
     @staticmethod

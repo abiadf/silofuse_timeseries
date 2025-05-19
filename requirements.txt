@@ -4,9 +4,11 @@ opt-einsum
 jupyter
 ipykernel
 matplotlib
+metasynth
 numpy
 pandas
 scikit-learn
+scikit-dimension
 # seaborn
 statsmodels
 # tensorflow
@@ -14,6 +16,7 @@ torch
 tslearn
 wandb
 PyYAML
+pykeops
 polars
 
 # anyio==4.9.0
