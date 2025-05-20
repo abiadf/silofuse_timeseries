@@ -7,7 +7,7 @@ myenv*/
 .DS_Store
 .idea/
 myenv*/
-venv*/
+*venv*/
 *.$*.kp
 **/__pycache__/
 *.cpython-310.pyc
