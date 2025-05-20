@@ -7,15 +7,14 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-
-from utils import compute_reconstruction_loss
+from utils import Losses
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 
 class Autoencoder(nn.Module):
-    """Autoencoder class containing encoder, decoder, and forward pass.
+    """Autoencoder class containing encoder, decoder, and forward pass
     Attributes:
         - input_size (int): Dimensionality of the input data
         - hidden_dim (int): Size of the first hidden layer in encoder/decoder
@@ -77,11 +76,10 @@ class Autoencoder(nn.Module):
 
     def forward(self, x_input: torch.Tensor) -> torch.Tensor:
         """Forward pass through the autoencoder (encoder + decoder). NOTE we also add a skip connection
-        - x_input (torch.Tensor): Input tensor to encode and reconstruct
+        - x_input (torch.Tensor): input tensor to encode and reconstruct
         - encoder (nn.Module): encoder model
         - decoder (nn.Module): decoder model
-        Returns:
-            torch.Tensor: Reconstructed output"""
+        - output (torch.Tensor): Reconstructed output"""
         x_input         = x_input.to(device)
         z_latent        = self.encoder(x_input)
         x_reconstructed = self.decoder(z_latent)
@@ -91,6 +89,7 @@ class Autoencoder(nn.Module):
         return x_reconstructed
 
     # ====================
+    # LDM portion
     def encode_to_latent(self, x_input: torch.Tensor) -> torch.Tensor:
         """[for LDM] Encodes the input into the latent space"""
         x_input  = x_input.to(device)
@@ -113,14 +112,14 @@ class Autoencoder(nn.Module):
 class TrainAutoencoder:
     """Class dealing with training the autoencoder, measured by the loss"""
     def _train_epoch(self, device: torch.device, autoencoder: Autoencoder, train_loader: DataLoader, optimizer: optim.Optimizer) -> float:
-        autoencoder.train()  # set to train mode
+        autoencoder.train() # set to train mode
         epoch_loss = 0
         for data in train_loader:
             x_input, _ = data
             x_input    = x_input.to(device)
             optimizer.zero_grad()
             x_reconstructed = autoencoder(x_input)
-            loss = compute_reconstruction_loss(x_input, x_reconstructed)
+            loss = Losses.compute_reconstruction_loss(x_input, x_reconstructed)
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
@@ -134,12 +133,12 @@ class TrainAutoencoder:
                 x_input, _      = data
                 x_input         = x_input.to(device)
                 x_reconstructed = autoencoder(x_input)
-                validation_loss = compute_reconstruction_loss(x_input, x_reconstructed)
+                validation_loss = Losses.compute_reconstruction_loss(x_input, x_reconstructed)
                 val_loss_total += validation_loss.item()
         return val_loss_total / len(validation_loader)
 
     def train_autoencoder(self, device: torch.device, autoencoder: Autoencoder, epochs: int, train_loader: DataLoader,
-                        optimizer: optim.Optimizer, scheduler, validation_loader: DataLoader = None, patience: int = 5) -> None:
+                          optimizer: optim.Optimizer, scheduler, validation_loader: DataLoader = None, patience: int = 5) -> None:
         """Trains the autoencoder for a specified # of epochs, with optional early stopping. A separate validation dataset, not used during training, is used to evaluate the model’s performance during training, helping to monitor the model’s ability to generalize and avoid overfitting. Args:
             - autoencoder (Autoencoder): An instance of the Autoencoder class to train.
             - epochs (int): Number of training epochs
@@ -160,9 +159,7 @@ class TrainAutoencoder:
             if validation_loader is not None:
                 avg_val_loss = self._validation_epoch(device, autoencoder, validation_loader)
                 print(f'Validation loss: {avg_val_loss:.4f}')
-
                 scheduler.step(avg_val_loss)
-
                 if avg_val_loss < best_loss:
                     best_loss        = avg_val_loss
                     epochs_no_improve= 0
@@ -172,7 +169,6 @@ class TrainAutoencoder:
                     print("Early stopping triggered")
                     break
         autoencoder.eval()
-
 
 # TODO to improve AE design
 # 	1.	Layer size / depth: Increase/decrease # of layers and their sizes

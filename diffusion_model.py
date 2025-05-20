@@ -7,12 +7,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from typing import Callable, Sequence, Tuple
-from utils import compute_mse_loss
+from utils import Losses
 import wandb
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
-
 
 class DiffusionUtils():
     """Handles the math of forward/reverse diffusion (noise)"""
@@ -117,7 +116,7 @@ class DiffusionUtils():
             raise ValueError(f"Unknown noise profile: {noise_profile}")
 
 
-# TODO: consider larger or non-square `UPSAMPLE_SCALE`
+# TODO: consider larger `UPSAMPLE_SCALE`
 # add temporal attention (or give them different weights) to focus on important timesteps
 # add multi-input layer to account for multivariate timeseries
 # use right loss function; MSE for timeseries regression, crossentropyloss for classification
@@ -136,7 +135,6 @@ class UNet(nn.Module):
         """Initialize UNet with input and base channel sizes. The `input_channels` parameter
         specifies the # of parallel features we have at each timestep"""
         super().__init__()
-
         self.input_channels= input_channels
         self.dropout_prob  = dropout_prob
         self.embedding_dim = embedding_dim
@@ -218,7 +216,6 @@ class UNet(nn.Module):
         x3 = self.bottleneck(x3) # (batch, 256, seq_len)
 
         # decode
-        # u1 = F.interpolate(x3, scale_factor=2, mode='nearest')
         u1 = F.interpolate(x3, scale_factor=self.UPSAMPLE_SCALE, mode='nearest')
         x2_resized = F.interpolate(x2, size=u1.shape[2:], mode='linear')
         u1 = torch.cat([u1, x2_resized], dim=1)
@@ -229,7 +226,7 @@ class UNet(nn.Module):
         u2 = torch.cat([u2, x1_resized], dim=1)
         u2 = self.up2(u2) # → (B, c1, 4L)
         out= self.output(u2)
-        out = F.interpolate(out, size=x.shape[-1], mode='linear')  # force size match
+        out= F.interpolate(out, size=x.shape[-1], mode='linear')  # force size match
         return out
 
 
@@ -262,7 +259,7 @@ class TrainDiffusion:
                 raise ValueError("x_t is None, cannot proceed with forward pass.")
 
             predicted_noise = model(x_t, t)
-            loss = compute_mse_loss(predicted_noise, true_noise)
+            loss = Losses.compute_mse_loss(predicted_noise, true_noise)
 
             if torch.isnan(loss):
                 raise ValueError("NaN loss detected. Check model output and noise schedule.")
@@ -305,7 +302,7 @@ class TrainDiffusion:
                 t   = torch.randint(0, diffusion_steps, (x_0.size(0),), device=device)
                 x_t, true_noise = self.diffusion.forward_diffusion(x_0, t, betas)
                 predicted_noise = model(x_t, t)
-                val_loss += compute_mse_loss(predicted_noise, true_noise).item() * x_0.size(0)
+                val_loss += Losses.compute_mse_loss(predicted_noise, true_noise).item() * x_0.size(0)
         return val_loss / len(validation_loader.dataset)
 
     def train_diffusion(self, device: torch.device, model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, scheduler, betas: torch.Tensor,

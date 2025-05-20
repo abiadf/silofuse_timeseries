@@ -7,33 +7,38 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from scipy.stats import kstest
-from scipy.stats import wasserstein_distance as wasserstein
-from statsmodels.tsa.stattools import acf
+from scipy.stats import kstest, wasserstein_distance as wasserstein
 from skdim.id import MLE
-from sklearn.manifold import Isomap
 from sklearn.decomposition import PCA
-from sklearn.manifold import LocallyLinearEmbedding
-
+from statsmodels.tsa.stattools import acf
 from tslearn.metrics import dtw
 
-def compute_reconstruction_loss(x_input: torch.Tensor, x_reconstructed: torch.Tensor) -> torch.Tensor:
-    """Computes reconstruction loss (MSE) between input and reconstructed output
-    - x_in (torch.Tensor): Original input
-    - x_out (torch.Tensor): Reconstructed input
-    - torch.Tensor: Scalar loss value"""
-
-    # MSE
-    return torch.nn.functional.mse_loss(x_reconstructed, x_input)
-
-    # MAE
-    return torch.nn.functional.l1_loss(x_reconstructed, x_input)
-
-class dimensionalityEstimator:
+class Losses:
+    @staticmethod
+    def compute_reconstruction_loss(x_input: torch.Tensor, x_reconstructed: torch.Tensor) -> torch.Tensor:
+        """Computes reconstruction loss (MSE) between input and reconstructed output
+        - x_in (torch.Tensor): Original input
+        - x_out (torch.Tensor): Reconstructed input
+        - torch.Tensor: Scalar loss value"""
+        # MSE
+        return torch.nn.functional.mse_loss(x_reconstructed, x_input)
+        # MAE
+        return torch.nn.functional.l1_loss(x_reconstructed, x_input)
 
     @staticmethod
+    def compute_mse_loss(predicted_noise, true_noise):
+        """Computes MSE loss given 2 inputs"""
+        if predicted_noise.shape != true_noise.shape:
+            true_noise = true_noise.unsqueeze(1)  # [B, 1, 128]
+            true_noise = F.interpolate(true_noise, size=(predicted_noise.shape[-1],), mode='nearest')
+            true_noise = true_noise.squeeze(1)  # back to [B, 512]
+        return torch.mean((predicted_noise - true_noise) ** 2)
+
+
+class DimensionalityEstimator:
+    @staticmethod
     def estimate_dataset_dimensionality(dataset):
-        """Estimate intrinsic dimensionality using scikit-dimension
+        """Estimate intrinsic dimensionality using scikit-dimension (ie best latent size)
         input: dataset (pd or pl df, or np array)
         output: estimated dataset dimensionality"""
         if isinstance(dataset, (pd.DataFrame, pl.DataFrame)):
@@ -45,32 +50,17 @@ class dimensionalityEstimator:
         return MLE().fit(X).dimension_
 
     @staticmethod
-    def components_with_variance(dataset, var: float = 0.95):
-        """Finds # of components explaining 95% variance"""
-        pca          = PCA().fit(dataset)
-        explained_variance = pca.explained_variance_ratio_
-        cum_var      = np.cumsum(explained_variance)
-        n_components = np.searchsorted(cum_var, var) + 1
+    def pca_components_explaining_variance(dataset, var: float = 0.95):
+        """Return # of PCA components explaining given variance (default 95%)"""
+        pca               = PCA().fit(dataset)
+        explained_variance= pca.explained_variance_ratio_
+        cum_var           = np.cumsum(explained_variance)
+        n_components      = np.searchsorted(cum_var, var) + 1
         return n_components
-    
-    @staticmethod
-    def ok2(dataset):
-        embedding = LocallyLinearEmbedding(n_neighbors=10, n_components=10, method='standard')
-        embedding.fit(dataset)
-        return embedding
-
-
-
-def compute_mse_loss(predicted_noise, true_noise):
-    """Computes MSE loss given 2 inputs"""
-    if predicted_noise.shape != true_noise.shape:
-        true_noise = true_noise.unsqueeze(1)  # [B, 1, 128]
-        true_noise = F.interpolate(true_noise, size=(predicted_noise.shape[-1],), mode='nearest')
-        true_noise = true_noise.squeeze(1)  # back to [B, 512]
-    return torch.mean((predicted_noise - true_noise) ** 2)
 
 
 def evaluate_and_plot_autoencoder_metrics(X_scaled, X_reconstructed, should_we_plot):
+    """Handles the stats evaluation and plotting for the Autoencoder"""
 
     X_tensor= torch.tensor(X_scaled, dtype=torch.float32)
     device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -83,7 +73,7 @@ def evaluate_and_plot_autoencoder_metrics(X_scaled, X_reconstructed, should_we_p
     generated_acfs     = []
     dtw_distances      = []
 
-    reconstruction_error = compute_reconstruction_loss(X_tensor.to(device),
+    reconstruction_error = Losses.compute_reconstruction_loss(X_tensor.to(device),
         torch.tensor(reconstructed_array, dtype=torch.float32).to(device))
 
     for i in range(n_features):
@@ -114,7 +104,6 @@ def evaluate_and_plot_autoencoder_metrics(X_scaled, X_reconstructed, should_we_p
     print(f"Real ACF (first 5 lags): {real_acfs[:5]}")
     print(f"Generated ACF (first 5 lags): {generated_acfs[:5]}")
     print(f"Avg DTW Distance: {np.mean(dtw_distances):.2f}")
-
 
     if should_we_plot == True:
         # Plotting the metrics
@@ -151,4 +140,3 @@ def evaluate_and_plot_autoencoder_metrics(X_scaled, X_reconstructed, should_we_p
         plt.show()
 
     return ks_stats, wasserstein_dists, real_acfs, generated_acfs, dtw_distances
-
