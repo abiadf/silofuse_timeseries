@@ -9,7 +9,7 @@ numpy
 pandas
 scikit-learn
 scikit-dimension
-# seaborn
+seaborn
 statsmodels
 # tensorflow
 torch
@@ -18,6 +18,7 @@ wandb
 PyYAML
 pykeops
 polars
+umap
 
 # anyio==4.9.0
 # argon2-cffi==23.1.0
