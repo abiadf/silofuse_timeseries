@@ -7,11 +7,31 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from scipy.linalg import sqrtm
 from scipy.stats import kstest, wasserstein_distance as wasserstein
 from skdim.id import MLE
 from sklearn.decomposition import PCA
 from statsmodels.tsa.stattools import acf
 from tslearn.metrics import dtw
+
+
+def get_frechet_distance(array1: np.ndarray, array2: np.ndarray) -> float:
+    """Compute the Fréchet Inception Distance (FID) between 2 arrays
+    - array1: np.ndarray of shape (N, D)
+    - array2: np.ndarray of shape (M, D)
+    - fid (float): lower is better (= closer distributions)"""
+
+    mu1, sigma1 = np.mean(array1, axis=0), np.cov(array1, rowvar=False)
+    mu2, sigma2 = np.mean(array2, axis=0), np.cov(array2, rowvar=False)
+    diff    = mu1 - mu2
+    covmean = sqrtm(sigma1 @ sigma2)
+
+    if np.iscomplexobj(covmean):
+        covmean = covmean.real
+
+    fid = diff @ diff + np.trace(sigma1 + sigma2 - 2 * covmean)
+    return float(fid)
+
 
 class Losses:
     @staticmethod
