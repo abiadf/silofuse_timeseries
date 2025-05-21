@@ -41,10 +41,10 @@ class DiffusionUtils():
         - diff_steps (int): total number of diffusion steps
         - stochastic (bool): true=DDPM, false=DDIM
         - x_t output (Tensor): reconstructed sample after denoising"""
-        
         betas      = betas.to(x_t.device)
         alphas     = 1 - betas
-        alpha_bars = torch.cumprod(alphas, dim=0).to(x_t.device)
+        # alpha_bars = torch.cumprod(alphas, dim=0).to(x_t.device)
+        alpha_bars = torch.cumprod(alphas, dim=0).clamp(min=1e-5).to(x_t.device)
 
         for t in reversed(range(diff_steps)):
             alpha_t    = alphas[t]
@@ -53,6 +53,8 @@ class DiffusionUtils():
             t_tensor   = torch.tensor([t] * x_t.shape[0], device=x_t.device).long() # Convert t to a tensor
             noise_pred = model(x_t, t_tensor)
             noise_pred = torch.clamp(noise_pred, -10.0, 10.0)
+            clamped = ((noise_pred < -10.0) | (noise_pred > 10.0)).float().mean()
+            wandb.log({"clamp_ratio": clamped.item()})
 
             # # check last few steps
             # if t > diff_steps - 5: # Check the last few steps
@@ -67,10 +69,11 @@ class DiffusionUtils():
                 noise_pred = torch.cat([noise_pred, padding], dim=-1)
             elif noise_pred.shape[-1] > x_t.shape[-1]:
                 noise_pred = noise_pred[..., :x_t.shape[-1]]
-
             coef1 = 1 / alpha_t.sqrt()
             # coef2 = (1 - alpha_t) / torch.sqrt(1 - alpha_bar_t)
-            coef2 = (1 - alpha_t) / torch.sqrt((1 - alpha_bar_t).clamp(min=1e-5))
+            # coef2 = (1 - alpha_t) / torch.sqrt((1 - alpha_bar_t).clamp(min=1e-5))
+            denominator = (1 - alpha_bar_t).clamp(min=1e-5)
+            coef2 = (1 - alpha_t) / torch.sqrt(denominator)
             mean  = coef1 * (x_t - coef2 * noise_pred)
 
             if t > 0 and DDPM_or_not:
@@ -81,7 +84,6 @@ class DiffusionUtils():
                 x_t   = mean + sigma * noise
             else:
                 x_t = mean
-
             if torch.isnan(x_t).any():
                 print(f"NaN detected in x_t at timestep {t} during reverse diffusion!")
                 break
@@ -131,37 +133,42 @@ class UNet(nn.Module):
     UPSAMPLE_SCALE = 2 # Pooling/upsample scale
     CHANNEL_MUL    = 2 # Channel scaling factor
 
-    def __init__(self, input_channels: int, dropout_prob: float, embedding_dim: int, base_channels: int) -> None:
-        """Initialize UNet with input and base channel sizes. The `input_channels` parameter
-        specifies the # of parallel features we have at each timestep"""
+    def __init__(self, num_original_data_channels: int, num_conditioning_channels: int, dropout_prob: float, embedding_dim: int, base_channels: int) -> None:
+        """Initialize UNet with input and base channel sizes."""
         super().__init__()
-        self.input_channels= input_channels
+        self.num_original_data_channels = num_original_data_channels
+        self.num_conditioning_channels  = num_conditioning_channels # This one might not be strictly needed as a self. attribute, but it's fine.
         self.dropout_prob  = dropout_prob
         self.embedding_dim = embedding_dim
 
-        # derive widths
+        # Calculate the effective input channels for the first layer (original data + conditioning)
+        effective_input_channels = num_original_data_channels + num_conditioning_channels
+
+        # Derive widths (these must be defined BEFORE being used in self.downX)
         c1 = base_channels
         c2 = base_channels * self.CHANNEL_MUL
         c3 = base_channels * self.CHANNEL_MUL
 
-        # encoder
-        self.down1 = self._conv_block(input_channels, c1)
+        # Encoder (ensure self.down1 uses effective_input_channels)
+        self.down1 = self._conv_block(effective_input_channels, c1)
         self.down2 = self._conv_block(c1, c2)
         self.down3 = self._conv_block(c2, c3)
 
-        # bottleneck
+        # Bottleneck
         self.bottleneck = self._conv_block(c3, c3)
 
-        # time-step MLP → c3 channels
+        # Time-step MLP → c3 channels
         self.time_mlp = nn.Sequential(
                             nn.Linear(embedding_dim, c3),
                             nn.ReLU(),
                             nn.Linear(c3, c3),)
-
         # Upsampling layers
         self.up1   = self._conv_block(c3 + c2, c2)
         self.up2   = self._conv_block(c2 + c1, c1)
-        self.output= nn.Conv1d(c1, input_channels, kernel_size=self.OUTPUT_KERNEL)
+
+        # Output layer: It must predict noise for ONLY the original data channels
+        self.output= nn.Conv1d(c1, num_original_data_channels, kernel_size=self.OUTPUT_KERNEL)
+
 
     def _conv_block(self, in_channels: int, out_channels: int) -> nn.Sequential:
         """Returns 2-layer convolutional block for 1D timeseries data. This block consists of
@@ -187,7 +194,7 @@ class UNet(nn.Module):
             nn.Dropout(self.dropout_prob),)
         return conv_block_module
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor, cond=None) -> torch.Tensor:
         """Forward pass through the UNet architecture for denoising; this method implements the
         encoding (downsampling), bottleneck, and decoding (upsampling) stages of the UNet. Skip
         connections are used to pass feature maps from the downsampling path to the corresponding
@@ -200,6 +207,8 @@ class UNet(nn.Module):
                                     Defaults to None, but can be used by the convolutional blocks if needed
         - output (torch.Tensor): The output tensor, representing the denoised prediction
                           Shape: [batch_size, num_channels, sequence_length]"""
+        if cond is not None:
+            x = torch.cat([x, cond], dim=1)  # Concatenate along feature/channel axis
         # encode
         x1 = self.down1(x)  # → (B, c1, L)
         x2 = self.down2(x1) # → (B, c2, L)
@@ -229,7 +238,6 @@ class UNet(nn.Module):
         out= F.interpolate(out, size=x.shape[-1], mode='linear')  # force size match
         return out
 
-
 class TrainDiffusion:
     """Training engine, using Diffusion to generate inputs, and UNet to predict added noise"""
 
@@ -237,73 +245,70 @@ class TrainDiffusion:
         self.diffusion = diffusion
         self.debug     = debug
 
-    def _prepare_batch(self, batch: Tuple[torch.Tensor, ...], device: torch.device, num_channels: int) -> torch.Tensor:
+    def _prepare_batch(self, batch: Tuple[torch.Tensor, ...], device: torch.device) -> torch.Tensor:
         """Prepares a batch of data for training/validation"""
         x_0 = batch[0].to(device)
+        if x_0.ndim == 2:
+            x_0 = x_0.unsqueeze(0) # Makes it (1, features, sequence_length)
         return x_0
 
     def _train_epoch(self, model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, betas: torch.Tensor,
-                    diffusion_steps: int, device: torch.device, num_channels: int, alphas: torch.Tensor, alpha_bars: torch.Tensor) -> float:
+                     diffusion_steps: int, device: torch.device, alphas: torch.Tensor, alpha_bars: torch.Tensor) -> float:
         """Performs 1 training epoch
         model (nn.Module): Expects model like UNet that predicts noise from (x_t, t)"""
-
         model.train()
         total_loss = 0
-
         for i, batch in enumerate(train_loader):
-            x_0 = self._prepare_batch(batch, device, num_channels)
+            x_0 = self._prepare_batch(batch, device)
+            num_original_data_channels = x_0.shape[1]
             t   = torch.randint(0, diffusion_steps, (x_0.size(0),), device=device)
             x_t, true_noise = self.diffusion.forward_diffusion(x_0, t, betas)
-
             if x_t is None:
                 raise ValueError("x_t is None, cannot proceed with forward pass.")
 
-            predicted_noise = model(x_t, t)
+            num_cond_channels = num_original_data_channels - 1
+            dummy_cond = torch.zeros(x_t.shape[0], num_cond_channels, x_t.shape[2], device=device)
+            predicted_noise = model(x_t, t, cond=dummy_cond)
             loss = Losses.compute_mse_loss(predicted_noise, true_noise)
-
             if torch.isnan(loss):
                 raise ValueError("NaN loss detected. Check model output and noise schedule.")
-
             optimizer.zero_grad(set_to_none=True) # set_to_none makes it faster
             loss.backward()
-
             total_grad_norm      = 0
             num_params_with_grad = 0
             for name, param in model.named_parameters():
                 if param.grad is not None:
                     total_grad_norm += param.grad.norm().item() ** 2
                     num_params_with_grad += 1
-
             if num_params_with_grad > 0:
                 avg_grad_norm = (total_grad_norm / num_params_with_grad) ** 0.5
                 wandb.log({"avg_grad_norm": avg_grad_norm})
 
-            # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # prevents exploding gradients
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
             optimizer.step()
-
             total_loss += loss.item() * x_0.size(0)
             wandb.log({"batch_loss": loss.item()}) # loss for each batch
-
         avg_loss = total_loss / len(train_loader.dataset)
-        # print(f"Epoch ?, loss: {avg_loss:.4f}")
         return avg_loss
 
     def _validation_epoch(self, model: nn.Module, validation_loader: DataLoader, betas: torch.Tensor,
-                            diffusion_steps: int, device: torch.device, num_channels: int,
-                            alphas: torch.Tensor, alpha_bars: torch.Tensor) -> float: # Accept alphas and alpha_bars
+                                diffusion_steps: int, device: torch.device,
+                                alphas: torch.Tensor, alpha_bars: torch.Tensor) -> float:
         """Performs 1 validation epoch"""
-
         model.eval()
         val_loss = 0
         with torch.no_grad():
             for batch in validation_loader:
-                x_0 = self._prepare_batch(batch, device, num_channels)
+                x_0 = self._prepare_batch(batch, device)
                 t   = torch.randint(0, diffusion_steps, (x_0.size(0),), device=device)
                 x_t, true_noise = self.diffusion.forward_diffusion(x_0, t, betas)
-                predicted_noise = model(x_t, t)
+                num_original_data_channels = x_0.shape[1]
+                num_cond_channels = num_original_data_channels - 1
+                dummy_cond = torch.zeros(x_t.shape[0], num_cond_channels, x_t.shape[2], device=device)
+                predicted_noise = model(x_t, t, cond=dummy_cond) # Pass cond argument
                 val_loss += Losses.compute_mse_loss(predicted_noise, true_noise).item() * x_0.size(0)
         return val_loss / len(validation_loader.dataset)
+
 
     def train_diffusion(self, device: torch.device, model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, scheduler, betas: torch.Tensor,
                         diffusion_steps: int, epochs: int, validation_loader: DataLoader = None, patience: int = 5,
@@ -331,15 +336,12 @@ class TrainDiffusion:
         model.to(device)
         best_val_loss    = float('inf')
         patience_counter = 0
-        num_channels     = model.output.in_channels if hasattr(model, 'output') and hasattr(model.output, 'in_channels') else model.down1[0].in_channels
-
         try:
             for epoch in range(epochs):
-                avg_loss = self._train_epoch(model, train_loader, optimizer, betas, diffusion_steps, device, num_channels, alphas, alpha_bars)
+                avg_loss = self._train_epoch(model, train_loader, optimizer, betas, diffusion_steps, device, alphas, alpha_bars)
                 wandb.log({"epoch_loss": avg_loss, "epoch": epoch + 1}) # Log average loss per epoch
-
                 if validation_loader:
-                    avg_val_loss = self._validation_epoch(model, validation_loader, betas, diffusion_steps, device, num_channels, alphas, alpha_bars)
+                    avg_val_loss = self._validation_epoch(model, validation_loader, betas, diffusion_steps, device, alphas, alpha_bars)
                     wandb.log({"val_loss": avg_val_loss, "epoch": epoch + 1})
                     if avg_val_loss   < best_val_loss:
                         best_val_loss    = avg_val_loss
@@ -351,30 +353,51 @@ class TrainDiffusion:
                             break
                 # scheduler.step()
                 scheduler.step(avg_val_loss)
-
         except KeyboardInterrupt:
             print("\nTraining interrupted by user")
-        # finally:
-        #     wandb.finish()
+        finally:
+            wandb.finish()
 
-    def sample_new_data(self, model: nn.Module, betas: torch.Tensor, diff_steps: int, shape: tuple[int, ...], DDPM_or_not) -> Tensor:
+    def sample_new_data(self, model, betas, timesteps, sample_shape, DDPM_or_not, conditioning_input=None):
+        """CONDITIONAL"""
         """Samples new data by reversing the diffusion process, starting from random noise. Args:
-            - model (nn.Module): trained diffusion model used for denoising
-            - betas (torch.Tensor): noise schedule for the diffusion process
-            - diff_steps (int): # of diffusion steps to reverse
-            - shape (tuple[int, ...]): shape of the generated sample (e.g., (batch_size, channels, height, width))
-            - output (torch.Tensor): generated sample after reversing the diffusion process"""
+        - model (nn.Module): trained diffusion model used for denoising
+        - betas (torch.Tensor): noise schedule for the diffusion process
+        - diff_steps (int): # of diffusion steps to reverse
+        - shape (tuple[int, ...]): shape of the generated sample (e.g., (batch_size, channels, height, width))
+        - output (torch.Tensor): generated sample after reversing the diffusion process"""
 
-        model.eval()
-        model.to(device)
-        x_t = torch.randn(shape).to(device)
-        for i in reversed(range(diff_steps)):
-            x_t = DiffusionUtils.reverse_diffusion(model, x_t, betas, diff_steps, DDPM_or_not)
-
-        if i == 0:
-            wandb.log({"final_sample": x_t[:,1]}) #for ex, feature idx 1
-        wandb.finish()
-        return x_t
+        device = next(model.parameters()).device
+        b, c, l= sample_shape
+        x      = torch.randn(sample_shape).to(device)
+        for t in reversed(range(timesteps)):
+            t_tensor = torch.full((b,), t, dtype=torch.long, device=device)
+            # Conditioning
+            if conditioning_input is not None:
+                cond = conditioning_input.to(device)
+                if cond.shape[-1] != l:
+                    cond = F.interpolate(cond, size=l, mode='linear')
+                x_in = torch.cat([x, cond], dim=1)
+            else:
+                x_in = x
+            noise_pred = model(x_in, t_tensor)
+            noise_pred = torch.clamp(noise_pred, -10.0, 10.0)
+            beta_t     = betas[t].to(device)
+            alpha_t    = 1.0 - beta_t
+            alpha_bar_t= torch.prod(1.0 - betas[:t + 1]).to(device).clamp(min=1e-5)
+            coef1      = 1 / alpha_t.sqrt()
+            coef2      = (1 - alpha_t) / (1 - alpha_bar_t).sqrt()
+            mean       = coef1 * (x - coef2 * noise_pred)
+            if t > 0 and DDPM_or_not:
+                noise = torch.randn_like(x).to(device)
+                sigma = beta_t.sqrt()
+                x = mean + sigma * noise
+            else:
+                x = mean
+            if conditioning_input is not None:
+                x[:, :cond.shape[1], :] = cond  # keep conditioning input fixed
+        # wandb.log({"final_sample": x[:, -1]})
+        return x
 
 
 def get_timestep_embedding(timesteps: torch.Tensor, embedding_dim: int) -> torch.Tensor:
@@ -414,27 +437,7 @@ def train_multi_client_diffusion_ldm(client_data_list, client_feature_counts, au
     num_latent_features   = combined_latent_tensor.shape[1] # Get the total number of latent features
 
     TrainDiffusion.train_diffusion(device, diffusion_model, latent_dataloader, optimizer_diffusion,
-                    None, betas, diffusion_steps, num_epochs_diff, num_channels=num_latent_features) # Pass num_latent_features as num_channels
-
-# moved to training class, to remove
-def sample_new_data(model: nn.Module, betas: torch.Tensor, diff_steps: int, shape: tuple[int, ...], DDPM_or_not) -> Tensor:
-    """Samples new data by reversing the diffusion process, starting from random noise. Args:
-        - model (nn.Module): trained diffusion model used for denoising
-        - betas (torch.Tensor): noise schedule for the diffusion process
-        - diff_steps (int): # of diffusion steps to reverse
-        - shape (tuple[int, ...]): shape of the generated sample (e.g., (batch_size, channels, height, width))
-        - output (torch.Tensor): generated sample after reversing the diffusion process"""
-
-    model.eval()
-    model.to(device)
-    x_t = torch.randn(shape).to(device)
-    for i in reversed(range(diff_steps)):
-        x_t = DiffusionUtils.reverse_diffusion(model, x_t, betas, diff_steps, DDPM_or_not)
-        wandb.log({"generated_sample_t_{}".format(i): wandb.Image(x_t.cpu().numpy())})
-
-    wandb.finish()
-    return x_t
-
+                    None, betas, diffusion_steps, num_epochs_diff)
 
 
 # TODO: options to improve the diffusion model:

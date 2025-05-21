@@ -13,7 +13,6 @@ datasets = {"WebTraffic": "WebTrafficLAcity/lacity.org-website-traffic.csv",
             "BeijingAirQuality": "BeijingAirQuality/beijing+multi+site+air+quality+data",
             "PanamaEnergy": "PanamaEnergy/continuous dataset.csv"}
 
-
 class CyclicEncoder:
 
     def __init__(self, name, df, propCycEnc):
@@ -113,7 +112,7 @@ class Preprocessor:
             self.train_indices = self.df_orig.index[self.df_orig['year'] != 2018].to_list()
         elif name == "BeijingAirQuality":
             temp = self.df_orig['year'].isin([2017])
-            self.test_indices = temp.loc[temp].index.to_list()
+            self.test_indices  = temp.loc[temp].index.to_list()
             temp_c = ~temp
             self.train_indices = temp_c.loc[temp_c].index.to_list()
         elif name == "AustraliaTourism":

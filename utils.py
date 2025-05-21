@@ -48,11 +48,8 @@ class Losses:
     @staticmethod
     def compute_mse_loss(predicted_noise, true_noise):
         """Computes MSE loss given 2 inputs"""
-        if predicted_noise.shape != true_noise.shape:
-            true_noise = true_noise.unsqueeze(1)  # [B, 1, 128]
-            true_noise = F.interpolate(true_noise, size=(predicted_noise.shape[-1],), mode='nearest')
-            true_noise = true_noise.squeeze(1)  # back to [B, 512]
-        return torch.mean((predicted_noise - true_noise) ** 2)
+        loss = F.mse_loss(predicted_noise, true_noise)
+        return loss
 
 
 class DimensionalityEstimator:
