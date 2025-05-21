@@ -18,7 +18,8 @@ wandb
 PyYAML
 pykeops
 polars
-umap
+umap-learn # not umap
+
 
 # anyio==4.9.0
 # argon2-cffi==23.1.0

@@ -212,7 +212,6 @@ class Preprocessor:
                 self.hierarchical_features_cyclic.append(col + '_sine')
                 self.hierarchical_features_cyclic.append(col + '_cos')
             return df_cleaned
-
         else:
             return df
 
