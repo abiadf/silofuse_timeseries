@@ -25,7 +25,6 @@ class DiffusionUtils():
         device      = x_0.device
         alphas      = 1. - betas
         alpha_bars  = torch.cumprod(alphas, dim=0).to(x_0.device)
-        # alpha_bar_t = alpha_bars[t].reshape(-1, 1, 1)  # (batch, 1, 1) for correct broadcasting
         alpha_bar_t = alpha_bars.gather(0, t).reshape(-1, 1, 1)
         noise       = torch.randn_like(x_0).to(x_0.device)
         x_t         = torch.sqrt(alpha_bar_t) * x_0 + torch.sqrt(1 - alpha_bar_t) * noise
@@ -43,7 +42,6 @@ class DiffusionUtils():
         - x_t output (Tensor): reconstructed sample after denoising"""
         betas      = betas.to(x_t.device)
         alphas     = 1 - betas
-        # alpha_bars = torch.cumprod(alphas, dim=0).to(x_t.device)
         alpha_bars = torch.cumprod(alphas, dim=0).clamp(min=1e-5).to(x_t.device)
 
         for t in reversed(range(diff_steps)):
@@ -56,13 +54,6 @@ class DiffusionUtils():
             clamped = ((noise_pred < -10.0) | (noise_pred > 10.0)).float().mean()
             wandb.log({"clamp_ratio": clamped.item()})
 
-            # # check last few steps
-            # if t > diff_steps - 5: # Check the last few steps
-            #     print(f"Timestep {t}, noise_pred stats: mean={noise_pred.mean().item():.4f}, std={noise_pred.std().item():.4f}, min={noise_pred.min().item():.4f}, max={noise_pred.max().item():.4f}")
-            #     if torch.isnan(noise_pred).any():
-            #         print(f"NaN detected in noise_pred at timestep {t}")
-            #         break
-
             # Temporary padding to match lengths (so code doesnt break)
             if noise_pred.shape[-1] < x_t.shape[-1]:
                 padding    = torch.zeros_like(x_t[..., :x_t.shape[-1] - noise_pred.shape[-1]])
@@ -70,8 +61,6 @@ class DiffusionUtils():
             elif noise_pred.shape[-1] > x_t.shape[-1]:
                 noise_pred = noise_pred[..., :x_t.shape[-1]]
             coef1 = 1 / alpha_t.sqrt()
-            # coef2 = (1 - alpha_t) / torch.sqrt(1 - alpha_bar_t)
-            # coef2 = (1 - alpha_t) / torch.sqrt((1 - alpha_bar_t).clamp(min=1e-5))
             denominator = (1 - alpha_bar_t).clamp(min=1e-5)
             coef2 = (1 - alpha_t) / torch.sqrt(denominator)
             mean  = coef1 * (x_t - coef2 * noise_pred)
