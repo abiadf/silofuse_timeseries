@@ -138,7 +138,7 @@ class TrainAutoencoder:
         return val_loss_total / len(validation_loader)
 
     def train_autoencoder(self, device: torch.device, autoencoder: Autoencoder, epochs: int, train_loader: DataLoader,
-                          optimizer: optim.Optimizer, scheduler, validation_loader: DataLoader = None, patience: int = 5) -> None:
+                          optimizer: optim.Optimizer, scheduler, validation_loader: DataLoader = None, patience: int = 5) -> float:
         """Trains the autoencoder for a specified # of epochs, with optional early stopping. A separate validation dataset, not used during training, is used to evaluate the model’s performance during training, helping to monitor the model’s ability to generalize and avoid overfitting. Args:
             - autoencoder (Autoencoder): An instance of the Autoencoder class to train.
             - epochs (int): Number of training epochs
@@ -153,7 +153,8 @@ class TrainAutoencoder:
 
         for epoch in range(epochs):
             avg_epoch_loss = self._train_epoch(device, autoencoder, train_loader, optimizer)
-            print(f'Epoch [{epoch+1}/{epochs}], training loss: {avg_epoch_loss:.4f}')
+            if epoch % 5 == 0:
+                print(f'Epoch [{epoch+1}/{epochs}], training loss: {avg_epoch_loss:.4f}')
 
             # Early stopping logic (if validation_loader is provided)
             if validation_loader is not None:
@@ -169,6 +170,7 @@ class TrainAutoencoder:
                     print("Early stopping triggered")
                     break
         autoencoder.eval()
+        return best_loss
 
 # TODO to improve AE design
 # 	1.	Layer size / depth: Increase/decrease # of layers and their sizes
