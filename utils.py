@@ -41,9 +41,9 @@ class Losses:
         - x_out (torch.Tensor): Reconstructed input
         - torch.Tensor: Scalar loss value"""
         # MSE
-        return torch.nn.functional.mse_loss(x_reconstructed, x_input)
+        return F.mse_loss(x_reconstructed, x_input)
         # MAE
-        return torch.nn.functional.l1_loss(x_reconstructed, x_input)
+        return F.l1_loss(x_reconstructed, x_input)
 
     @staticmethod
     def compute_mse_loss(predicted_noise, true_noise):

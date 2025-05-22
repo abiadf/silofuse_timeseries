@@ -23,11 +23,12 @@ def metaSynthTimeWeaver(constraints, hierarchical_feats, df):
     hierarchical_df = pd.DataFrame(combinations, columns=unique_values.keys())
     for column in df.columns:
         if column not in hierarchical_feats:
-            hierarchical_df[column] = np.NAN
+            hierarchical_df[column] = np.nan
     return hierarchical_df
 
 
 def metadataMask(metadata, synthmask, dataset):
+    """returns the fixed columns from each test set. Returns True to mask the row corresponding to the set of features"""
     if dataset == "MetroTraffic":
         if synthmask == "C":
             return metadata['year'] == 2018

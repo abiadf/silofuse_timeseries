@@ -29,5 +29,5 @@ training:
   epochs:              1000
 
 synthesis:
-  synth_mask:          'C'
+  synth_mask:          'C' # C = coarse, M = medium, F = fine
   n_trials:            5
