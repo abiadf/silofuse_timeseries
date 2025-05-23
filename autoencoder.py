@@ -17,21 +17,21 @@ class Autoencoder(nn.Module):
     """Autoencoder class containing encoder, decoder, and forward pass
     Attributes:
         - input_size (int): Dimensionality of the input data
-        - hidden_dim (int): Size of the first hidden layer in encoder/decoder
-        - encoding_dim (int): Size of the second hidden layer in encoder/decoder
+        - layer1_dim (int): Size of the first hidden layer in encoder/decoder
+        - layer2_dim (int): Size of the second hidden layer in encoder/decoder
         - latent_dim (int): Size of the latent representation
         - dropout_prob (float): dropout probability
         - encoder (nn.Sequential): encoder network
         - decoder (nn.Sequential): decoder network"""
     
-    def __init__(self, input_size: int, hidden_dim: int, encoding_dim: int,
+    def __init__(self, input_size: int, layer1_dim: int, layer2_dim: int,
                  latent_dim: int, dropout_prob: float):
         """Initializes Autoencoder"""
 
         super(Autoencoder, self).__init__()
         self.input_size   = input_size
-        self.hidden_dim   = hidden_dim
-        self.encoding_dim = encoding_dim
+        self.layer1_dim   = layer1_dim
+        self.layer2_dim   = layer2_dim
         self.latent_dim   = latent_dim
         self.dropout_prob = dropout_prob
 
@@ -43,17 +43,17 @@ class Autoencoder(nn.Module):
         - nn.Sequential: encoder network"""
         
         encoder = nn.Sequential(
-                    nn.Linear(self.input_size, self.hidden_dim),
-                    nn.BatchNorm1d(self.hidden_dim),
+                    nn.Linear(self.input_size, self.layer1_dim),
+                    nn.BatchNorm1d(self.layer1_dim),
                     # nn.ReLU(),
                     nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
                     nn.Dropout(self.dropout_prob),
-                    nn.Linear(self.hidden_dim, self.encoding_dim),
-                    nn.BatchNorm1d(self.encoding_dim),
+                    nn.Linear(self.layer1_dim, self.layer2_dim),
+                    nn.BatchNorm1d(self.layer2_dim),
                     # nn.ReLU(),
                     nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
                     nn.Dropout(self.dropout_prob),
-                    nn.Linear(self.encoding_dim, self.latent_dim))
+                    nn.Linear(self.layer2_dim, self.latent_dim))
         return encoder
 
     def _build_decoder(self) -> nn.Sequential:
@@ -61,17 +61,17 @@ class Autoencoder(nn.Module):
         - nn.Sequential: decoder network"""
 
         decoder = nn.Sequential(
-                    nn.Linear(self.latent_dim, self.encoding_dim),
-                    nn.BatchNorm1d(self.encoding_dim),
+                    nn.Linear(self.latent_dim, self.layer2_dim),
+                    nn.BatchNorm1d(self.layer2_dim),
                     nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
                     # nn.ReLU(),
                     nn.Dropout(self.dropout_prob),
-                    nn.Linear(self.encoding_dim, self.hidden_dim),
-                    nn.BatchNorm1d(self.hidden_dim),
+                    nn.Linear(self.layer2_dim, self.layer1_dim),
+                    nn.BatchNorm1d(self.layer1_dim),
                     nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
                     # nn.ReLU(),
                     nn.Dropout(self.dropout_prob),
-                    nn.Linear(self.hidden_dim, self.input_size))
+                    nn.Linear(self.layer1_dim, self.input_size))
         return decoder
 
     def forward(self, x_input: torch.Tensor) -> torch.Tensor:
@@ -85,7 +85,7 @@ class Autoencoder(nn.Module):
         x_reconstructed = self.decoder(z_latent)
 
         # skip connection
-        x_reconstructed = x_reconstructed + x_input
+        # x_reconstructed = x_reconstructed + x_input
         return x_reconstructed
 
     # ====================
@@ -119,7 +119,7 @@ class TrainAutoencoder:
             x_input    = x_input.to(device)
             optimizer.zero_grad()
             x_reconstructed = autoencoder(x_input)
-            loss = Losses.compute_reconstruction_loss(x_input, x_reconstructed)
+            loss = Losses.compute_MSE_loss(x_input, x_reconstructed)
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
@@ -133,12 +133,12 @@ class TrainAutoencoder:
                 x_input, _      = data
                 x_input         = x_input.to(device)
                 x_reconstructed = autoencoder(x_input)
-                validation_loss = Losses.compute_reconstruction_loss(x_input, x_reconstructed)
+                validation_loss = Losses.compute_MSE_loss(x_input, x_reconstructed)
                 val_loss_total += validation_loss.item()
         return val_loss_total / len(validation_loader)
 
     def train_autoencoder(self, device: torch.device, autoencoder: Autoencoder, epochs: int, train_loader: DataLoader,
-                          optimizer: optim.Optimizer, scheduler, validation_loader: DataLoader = None, patience: int = 5) -> float:
+                          optimizer: optim.Optimizer, scheduler, validation_loader: DataLoader = None, patience: int = 15) -> float:
         """Trains the autoencoder for a specified # of epochs, with optional early stopping. A separate validation dataset, not used during training, is used to evaluate the model’s performance during training, helping to monitor the model’s ability to generalize and avoid overfitting. Args:
             - autoencoder (Autoencoder): An instance of the Autoencoder class to train.
             - epochs (int): Number of training epochs
@@ -153,13 +153,13 @@ class TrainAutoencoder:
 
         for epoch in range(epochs):
             avg_epoch_loss = self._train_epoch(device, autoencoder, train_loader, optimizer)
-            if epoch % 5 == 0:
+            if (epoch+1) % 30 == 0:
                 print(f'Epoch [{epoch+1}/{epochs}], training loss: {avg_epoch_loss:.4f}')
 
             # Early stopping logic (if validation_loader is provided)
             if validation_loader is not None:
                 avg_val_loss = self._validation_epoch(device, autoencoder, validation_loader)
-                if epoch % 5 == 0:
+                if (epoch+1) % 30 == 0:
                     print(f'Validation loss: {avg_val_loss:.4f}')
                 scheduler.step(avg_val_loss)
                 if avg_val_loss < best_loss:

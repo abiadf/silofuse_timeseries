@@ -3,8 +3,8 @@ dataset:
   train_valid_split:  0.8  # 80% training 20% validation
 
 autoencoder_design:
-  hidden_dim:         22        # layer 1 nodes
-  encoding_dim:       10        # layer 2 nodes
+  layer1_dim:         22        # layer 1 nodes
+  layer2_dim:       10        # layer 2 nodes
   latent_dim:         6         # latent layer nodes
   dropout_prob:       0.15      # probability of dropping units during training
 

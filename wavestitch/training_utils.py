@@ -2,7 +2,7 @@
 
 import pandas as pd
 import torch
-
+from typing import Any, Dict
 from data_utils import datasets, CyclicEncoder, Preprocessor
 from copy import deepcopy
 import argparse
@@ -40,7 +40,7 @@ def fetchModel(in_features, out_features, args):
     return model
 
 
-def fetchDiffusionConfig(args):
+def fetchDiffusionConfig(args: Any) -> Dict[str, Any]:
     betas = np.linspace(args.beta_0, args.beta_T, args.timesteps).reshape((-1, 1))
     alphas = 1 - betas
     alpha_bars = np.cumprod(alphas).reshape((-1, 1))

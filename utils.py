@@ -35,21 +35,22 @@ def get_frechet_distance(array1: np.ndarray, array2: np.ndarray) -> float:
 
 class Losses:
     @staticmethod
-    def compute_reconstruction_loss(x_input: torch.Tensor, x_reconstructed: torch.Tensor) -> torch.Tensor:
+    def compute_MSE_loss(x_input: torch.Tensor, x_reconstructed: torch.Tensor) -> torch.Tensor:
         """Computes reconstruction loss (MSE) between input and reconstructed output
         - x_in (torch.Tensor): Original input
         - x_out (torch.Tensor): Reconstructed input
         - torch.Tensor: Scalar loss value"""
         # MSE
         return F.mse_loss(x_reconstructed, x_input)
-        # MAE
-        return F.l1_loss(x_reconstructed, x_input)
 
     @staticmethod
-    def compute_mse_loss(predicted_noise, true_noise):
-        """Computes MSE loss given 2 inputs"""
-        loss = F.mse_loss(predicted_noise, true_noise)
-        return loss
+    def compute_MAE_loss(x_input: torch.Tensor, x_reconstructed: torch.Tensor) -> torch.Tensor:
+        """Computes reconstruction loss (MAE) between input and reconstructed output
+        - x_in (torch.Tensor): Original input
+        - x_out (torch.Tensor): Reconstructed input
+        - torch.Tensor: Scalar loss value"""
+        # MAE
+        return F.l1_loss(x_reconstructed, x_input)
 
 
 class DimensionalityEstimator:
@@ -90,7 +91,7 @@ def evaluate_and_plot_autoencoder_metrics(X_scaled, X_reconstructed, should_we_p
     generated_acfs     = []
     dtw_distances      = []
 
-    reconstruction_error = Losses.compute_reconstruction_loss(X_tensor.to(device),
+    reconstruction_error = Losses.compute_MSE_loss(X_tensor.to(device),
         torch.tensor(reconstructed_array, dtype=torch.float32).to(device))
 
     for i in range(n_features):

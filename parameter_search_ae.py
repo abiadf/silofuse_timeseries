@@ -4,8 +4,8 @@ import autoencoder as ae
 import torch
 
 param_grid = {
-    'hidden_dim':     [12, 16, 20],
-    'encoding_dim':   [6, 8, 10],
+    'layer1_dim':     [12, 16, 20],
+    'layer2_dim':   [6, 8, 10],
     'latent_dim':     [3, 4, 5],
     'dropout_prob':   [0.05, 0.1, 0.15],
     'optimizer_lr':   [0.0001, 0.0005]
@@ -13,8 +13,8 @@ param_grid = {
 
 # (16, 8, 3, 0.1, 0.0001)
 results = []
-for hd, ed, ld, dp, lr in product(param_grid['hidden_dim'],
-                                  param_grid['encoding_dim'],
+for hd, ed, ld, dp, lr in product(param_grid['layer1_dim'],
+                                  param_grid['layer2_dim'],
                                   param_grid['latent_dim'],
                                   param_grid['dropout_prob'],
                                   param_grid['optimizer_lr']):

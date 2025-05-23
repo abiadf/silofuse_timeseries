@@ -258,7 +258,7 @@ class TrainDiffusion:
             num_cond_channels = num_original_data_channels - 1
             dummy_cond = torch.zeros(x_t.shape[0], num_cond_channels, x_t.shape[2], device=device)
             predicted_noise = model(x_t, t, cond=dummy_cond)
-            loss = Losses.compute_mse_loss(predicted_noise, true_noise)
+            loss = Losses.compute_MSE_loss(predicted_noise, true_noise)
             if torch.isnan(loss):
                 raise ValueError("NaN loss detected. Check model output and noise schedule.")
             optimizer.zero_grad(set_to_none=True) # set_to_none makes it faster
@@ -295,7 +295,7 @@ class TrainDiffusion:
                 num_cond_channels = num_original_data_channels - 1
                 dummy_cond = torch.zeros(x_t.shape[0], num_cond_channels, x_t.shape[2], device=device)
                 predicted_noise = model(x_t, t, cond=dummy_cond) # Pass cond argument
-                val_loss += Losses.compute_mse_loss(predicted_noise, true_noise).item() * x_0.size(0)
+                val_loss += Losses.compute_MSE_loss(predicted_noise, true_noise).item() * x_0.size(0)
         return val_loss / len(validation_loader.dataset)
 
 
