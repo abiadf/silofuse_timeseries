@@ -159,7 +159,8 @@ class TrainAutoencoder:
             # Early stopping logic (if validation_loader is provided)
             if validation_loader is not None:
                 avg_val_loss = self._validation_epoch(device, autoencoder, validation_loader)
-                print(f'Validation loss: {avg_val_loss:.4f}')
+                if epoch % 5 == 0:
+                    print(f'Validation loss: {avg_val_loss:.4f}')
                 scheduler.step(avg_val_loss)
                 if avg_val_loss < best_loss:
                     best_loss        = avg_val_loss
