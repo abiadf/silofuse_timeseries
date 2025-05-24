@@ -4,7 +4,7 @@ dataset:
 
 autoencoder_design:
   layer1_dim:         22        # layer 1 nodes
-  layer2_dim:       10        # layer 2 nodes
+  layer2_dim:         10        # layer 2 nodes
   latent_dim:         6         # latent layer nodes
   dropout_prob:       0.15      # probability of dropping units during training
 
@@ -28,7 +28,7 @@ diff_noise_scheduler:
   end_noise_val:      0.01      # end noise value
 
 diffusion_training:
-  batch_size:         512      # number of samples per batch (into dataloader)
+  diff_batch_size:    512       # number of samples per batch (into dataloader)
   train_epochs:       200       # num of diffusion training epochs
   training_patience:  300       # how many epochs with no improvement to stop training
   optimizer_lr:       0.005     # learning rate for the optimizer
@@ -38,6 +38,6 @@ diffusion_training:
   scheduler_factor:   0.5       # multiplies lr by this factor when validation loss plateaus
 
 Unet_design:
-  dropout_prob:       0.  # probability of dropping units during training
+  dropout_prob:       0   # probability of dropping units during training
   base_channels:      28   # number of filters in 1st Unet layer (should NOT exceed # of dataset features)
   embedding_dim:      128  # time-step embedding size

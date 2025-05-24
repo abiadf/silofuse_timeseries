@@ -352,19 +352,20 @@ class SSSDS4Imputer(nn.Module):
                                         nn.ReLU(),
                                         ZeroConv1d(skip_channels, out_channels))
 
-    def forward(self, input_data, timesteps):
+    def forward(self, input_data, diffusion_steps):
+        """NOTE: fixed a type issue about permuting a tuple, see commented line"""
         # noise, conditional, mask, diffusion_steps = input_data
-        noised_data, diffusion_steps = input_data.permute((0, 2, 1)), timesteps
+        # noised_data, diffusion_steps = input_data.permute((0, 2, 1)), diffusion_steps
+        x = input_data#.permute(0, 2, 1)
 
         # conditional = conditional * mask
         # conditional = torch.cat([conditional, mask.float()], dim=1)
-        #
         # x = noise
         # x = self.init_conv(x)
         # x = self.residual_layer((x, conditional, diffusion_steps))
         # y = self.final_conv(x)
-        x = noised_data
         x = self.init_conv(x)
+        # x = self.residual_layer((x, diffusion_steps))
         x = self.residual_layer((x, diffusion_steps))
         y = self.final_conv(x)
         return y
