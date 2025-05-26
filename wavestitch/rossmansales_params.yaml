@@ -8,7 +8,7 @@ shared:
   timesteps:           200
   hdim:                64
   lr:                  0.0001
-  diff_batch_size:          1024
+  diff_batch_size:     1024
   layers:              4
   window_size:         32
   stride:              1
@@ -30,19 +30,18 @@ training:
 
 synthesis:
   synth_mask:          'C' # C = coarse, M = medium, F = fine
-  n_trials:            5
+  n_trials:            1
 
 autoencoder: # optimized from hyperparameter search
-  layer1_dim:          20
+  layer1_dim:          21    # size of hidden dimension
   layer2_dim:          9
-  latent_dim:          4
-  dropout_prob:        0.19
-  optimizer_lr:        0.0011
-
-  ae_training_epochs:  30
-  ae_batch_size:       32
+  latent_dim:          4     # num of features in latent layer
+  dropout_prob:        0.15
+  ae_training_epochs:  100
+  ae_batch_size:       126
+  ae_optimizer_lr:     0.0011
   weight_decay:        0.00001
-  training_patience:   5
-  scheduler_patience:  3
+  training_patience:   70
+  scheduler_patience:  70
   scheduler_mode:      'min'
   scheduler_factor:    0.8
