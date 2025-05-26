@@ -356,7 +356,7 @@ class SSSDS4Imputer(nn.Module):
         """NOTE: fixed a type issue about permuting a tuple, see commented line"""
         # noise, conditional, mask, diffusion_steps = input_data
         # noised_data, diffusion_steps = input_data.permute((0, 2, 1)), diffusion_steps
-        x = input_data#.permute(0, 2, 1)
+        x = input_data.permute(0, 2, 1)
 
         # conditional = conditional * mask
         # conditional = torch.cat([conditional, mask.float()], dim=1)
