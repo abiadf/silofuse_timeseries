@@ -25,8 +25,8 @@ shared:
   s4_layernorm:        True
   propCycEnc:          False
 
-latent_diffusion:                    # LDM
-  latent_batch_size:          48     # 64
+latent_diffusion:        # LDM
+  latent_batch_size:          32     # 
   latent_lr:                  0.0001 # Learning rate specific to the latent diffusion model
   latent_epochs:              100    # Number of epochs specific to the latent diffusion model
   latent_beta_0:              0.0001 # Beta start for the latent diffusion schedule
@@ -39,7 +39,7 @@ latent_diffusion:                    # LDM
   latent_diff_step_embed_mid: 64     # Mid dim for time embedding in LDM
   latent_diff_step_embed_out: 64     # Output dim for time embedding in LDM
   latent_s4_lmax:             100    # S4 lmax for the LDM's denoiser (should be related to latent sequence length)
-  latent_s4_dstate:           64     # S4 state dimension for the LDM's denoiser
+  latent_s4_dstate:           32     # S4 state dimension for the LDM's denoiser
   latent_s4_dropout:          0.0    # S4 dropout for the LDM's denoiser
 
 training:
