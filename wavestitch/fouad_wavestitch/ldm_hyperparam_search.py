@@ -1,4 +1,4 @@
-"""Hyperparameter search for LDM diffusion"""
+"""Hyperparameter search for LDM diffusion. Copy this into the notebook after LDM diffusion is called"""
 
 from itertools import product
 import torch.optim as optim

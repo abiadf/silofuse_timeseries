@@ -1,4 +1,5 @@
-"""Hyperparameter search for AE"""
+"""Hyperparameter search for AE. Copy this into the notebook after the AE is called"""
+
 import torch
 from itertools import product
 
@@ -11,7 +12,6 @@ param_grid = {
     'batch_size':     [122, 124,126, 128, 130, 132, 134]
 }
 # Best AE params: (21, 9, 4, 0.15, 0.0011, 128)
-# Best AE params: (22, 9, 4, 0.15, 0.0011, 128)
 
 results = []
 for hd, ed, ld, dp, lr, bs in product(param_grid['layer1_dim'],

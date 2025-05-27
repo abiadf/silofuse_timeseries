@@ -1,4 +1,4 @@
-"""Hyperparameter search for diffusion"""
+"""Hyperparameter search for diffusion. Copy this into the notebook after diffusion is called"""
 
 from itertools import product
 import torch
