@@ -3,6 +3,7 @@ shared:
   dataset:             'RossmanSales'
   backbone:            'S4'
   random_seed:         42
+  data_split:          0.8  # train-test split
   beta_0:              0.0001
   beta_T:              0.02
   timesteps:           200
@@ -26,14 +27,14 @@ shared:
   propCycEnc:          False
 
 latent_diffusion:        # LDM
-  latent_batch_size:          32     # 
+  latent_batch_size:          128    # 
   latent_lr:                  0.0001 # Learning rate specific to the latent diffusion model
   latent_epochs:              100    # Number of epochs specific to the latent diffusion model
   latent_beta_0:              0.0001 # Beta start for the latent diffusion schedule
   latent_beta_T:              0.02   # Beta end for the latent diffusion schedule
   latent_timesteps:           200    # Number of diffusion steps for the latent diffusion model
-  latent_num_res_layers:      4      # Number of residual layers in the LDM's denoiser
-  latent_res_channels:        64     # Channels in residual blocks for the LDM's denoiser
+  latent_num_res_layers:      2      # Number of residual layers in the LDM's denoiser
+  latent_res_channels:        128    # Channels in residual blocks for the LDM's denoiser
   latent_skip_channels:       64     # Channels in skip connections for the LDM's denoiser
   latent_diff_step_embed_in:  32     # Input dim for time embedding in LDM
   latent_diff_step_embed_mid: 64     # Mid dim for time embedding in LDM
