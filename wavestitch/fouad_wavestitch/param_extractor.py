@@ -51,7 +51,7 @@ diffusion_args = SimpleNamespace(
     s4_bidirectional    = wavestitch_yaml['shared']['s4_bidirectional'],
     s4_layernorm        = wavestitch_yaml['shared']['s4_layernorm'],
     propCycEnc          = wavestitch_yaml['shared']['propCycEnc'],
-    epochs              = 100, #wavestitch_yaml['training']['epochs'],
+    epochs              = wavestitch_yaml['training']['epochs'],
     synth_mask          = wavestitch_yaml['synthesis']['synth_mask'],
     n_trials            = wavestitch_yaml['synthesis']['n_trials'])
 
@@ -73,4 +73,7 @@ LDM_args = SimpleNamespace(
     diff_step_embed_out= wavestitch_yaml['latent_diffusion']['latent_diff_step_embed_out'],
     s4_lmax            = wavestitch_yaml['latent_diffusion']['latent_s4_lmax'],
     s4_dstate          = wavestitch_yaml['latent_diffusion']['latent_s4_dstate'],
-    s4_dropout         = wavestitch_yaml['latent_diffusion']['latent_s4_dropout'],)
+    s4_dropout         = wavestitch_yaml['latent_diffusion']['latent_s4_dropout'],
+    propCycEnc         = wavestitch_yaml['latent_diffusion']['propCycEnc'],
+    num_samples        = wavestitch_yaml['latent_diffusion']['num_samples'],
+    )

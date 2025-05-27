@@ -845,11 +845,13 @@ class SSKernelNPLR(nn.Module):
     def register(self, name, tensor, trainable=False, lr=None, wd=None):
         """Utility method: register a tensor as a buffer or trainable parameter"""
 
+        tensor_to_register = tensor.clone().contiguous()
         if trainable:
-            self.register_parameter(name, nn.Parameter(tensor))
+            # self.register_parameter(name, nn.Parameter(tensor))
+            self.register_parameter(name, nn.Parameter(tensor_to_register))
         else:
-            self.register_buffer(name, tensor)
-
+            # self.register_buffer(name, tensor)
+            self.register_buffer(name, tensor_to_register)
         optim = {}
         if trainable and lr is not None:
             optim["lr"] = lr

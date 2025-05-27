@@ -153,13 +153,13 @@ class TrainAutoencoder:
 
         for epoch in range(epochs):
             avg_epoch_loss = self._train_epoch(device, autoencoder, train_loader, optimizer)
-            if (epoch+1) % 30 == 0:
+            if (epoch+1) % 25 == 0:
                 print(f'Epoch [{epoch+1}/{epochs}], training loss: {avg_epoch_loss:.4f}')
 
             # Early stopping logic (if validation_loader is provided)
             if validation_loader is not None:
                 avg_val_loss = self._validation_epoch(device, autoencoder, validation_loader)
-                if (epoch+1) % 30 == 0:
+                if (epoch+1) % 25 == 0:
                     print(f'Validation loss: {avg_val_loss:.4f}')
                 scheduler.step(avg_val_loss)
                 if avg_val_loss < best_loss:

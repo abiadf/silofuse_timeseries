@@ -25,6 +25,25 @@ shared:
   s4_bidirectional:    True
   s4_layernorm:        True
   propCycEnc:          False
+training:
+  epochs:              100
+synthesis:
+  synth_mask:          'C' # C = coarse, M = medium, F = fine
+  n_trials:            1   # synthesis trials
+
+autoencoder: # optimized from hyperparameter search
+  layer1_dim:          21    # size of hidden dimension
+  layer2_dim:          9
+  latent_dim:          4     # num of features in latent layer
+  dropout_prob:        0.15
+  ae_training_epochs:  100
+  ae_batch_size:       126
+  ae_optimizer_lr:     0.0011
+  weight_decay:        0.00001
+  training_patience:   70
+  scheduler_patience:  70
+  scheduler_mode:      'min'
+  scheduler_factor:    0.8
 
 latent_diffusion:        # LDM
   latent_batch_size:          128    # 
@@ -42,24 +61,5 @@ latent_diffusion:        # LDM
   latent_s4_lmax:             100    # S4 lmax for the LDM's denoiser (should be related to latent sequence length)
   latent_s4_dstate:           32     # S4 state dimension for the LDM's denoiser
   latent_s4_dropout:          0.0    # S4 dropout for the LDM's denoiser
-
-training:
-  epochs:              1000
-
-synthesis:
-  synth_mask:          'C' # C = coarse, M = medium, F = fine
-  n_trials:            1
-
-autoencoder: # optimized from hyperparameter search
-  layer1_dim:          21    # size of hidden dimension
-  layer2_dim:          9
-  latent_dim:          4     # num of features in latent layer
-  dropout_prob:        0.15
-  ae_training_epochs:  100
-  ae_batch_size:       126
-  ae_optimizer_lr:     0.0011
-  weight_decay:        0.00001
-  training_patience:   70
-  scheduler_patience:  70
-  scheduler_mode:      'min'
-  scheduler_factor:    0.8
+  propCycEnc:                 False
+  num_samples:                100
