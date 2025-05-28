@@ -88,7 +88,7 @@ class CyclicEncoder:
 
 
 class Preprocessor:
-    """This module splits the data"""
+    """This module scales then splits the data"""
     def __init__(self, dataset_name, propCycEnc):
         self.cyclic_encoded_columns        = None
         self.hierarchical_features_uncyclic= []

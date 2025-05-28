@@ -3,13 +3,13 @@
 from types import SimpleNamespace
 import yaml
 
-dataset = "RossmanSales" # "RossmanSales", "BeijingAirQuality", "", "", "PanamaElectricity"
+dataset_name = "RossmanSales" # "RossmanSales", "BeijingAirQuality", "", "", "PanamaElectricity"
 
 filenames_dict = {"RossmanSales": "rossmansales_params.yaml",
                   "BeijingAirQuality": "beijingairquality_params.yaml",
                   "PanamaElectricity": "panama_electricity_params.yaml",}
 
-with open(filenames_dict[dataset], 'r') as wavestitch_file:
+with open(filenames_dict[dataset_name], 'r') as wavestitch_file:
     wavestitch_yaml = yaml.safe_load(wavestitch_file)
 
 ae_args = SimpleNamespace(
