@@ -11,10 +11,10 @@ import autoencoder as ae
 from training_utils import MyDataset, fetchDiffusionConfig, fetchModel
 
 
-def train_and_save_autoencoder(X_tensor_train, train_dataset, val_dataset, ae_args, dataset, device):
-    input_size   = X_tensor_train.shape[1]
+def train_and_save_autoencoder(train_dataset, test_dataset, ae_args, dataset, device):
+    input_size   = train_dataset[0][0].shape[0]
     train_loader = DataLoader(train_dataset, batch_size=ae_args.ae_batch_size, shuffle=True)
-    val_loader   = DataLoader(val_dataset, batch_size=ae_args.ae_batch_size, shuffle=False)
+    val_loader   = DataLoader(test_dataset, batch_size=ae_args.ae_batch_size, shuffle=False)
     autoencoder  = ae.Autoencoder(input_size, ae_args.ae_layer1_dim, ae_args.ae_layer2_dim, ae_args.ae_latent_dim, ae_args.ae_dropout_prob)
     optimizer    = torch.optim.AdamW(autoencoder.parameters(), lr=ae_args.ae_optimizer_lr, weight_decay=ae_args.ae_weight_decay)
     scheduler    = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, ae_args.ae_scheduler_mode, patience=ae_args.ae_scheduler_patience, factor=ae_args.ae_scheduler_factor)

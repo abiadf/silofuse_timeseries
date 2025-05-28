@@ -11,8 +11,8 @@ shared:
   lr:                  0.0001
   diff_batch_size:     1024
   layers:              4
-  window_size:         32
-  stride:              1
+  window_size:         32 # >0, power of 2
+  stride:              1  # <= window_size
   num_res_layers:      4
   res_channels:        64
   skip_channels:       64

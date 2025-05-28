@@ -103,10 +103,10 @@ for trial in range(n_trials):
             b_t   = diffusion_config['betas'][step].to(device)
             sampled_noise= create_pipelined_noise(test_batch, stride, window_size).to(device)
             cached       = torch.sqrt(ab_t) * test_batch + torch.sqrt(1 - ab_t) * sampled_noise
-            mask_exp     = torch.zeros_like(test_batch, dtype=bool)
+            mask_expanded     = torch.zeros_like(test_batch, dtype=bool)
             for c in non_hier_cols:
-                mask_exp[:, :, c] = mask_batch
-            x[~mask_exp] = cached[~mask_exp]
+                mask_expanded[:, :, c] = mask_batch
+            x[~mask_expanded] = cached[~mask_expanded]
             x[:, :, hierarchical_column_indices] = test_batch[:, :, hierarchical_column_indices]
             eps  = model(x, times).permute(0, 2, 1)
             vari = 0.0
@@ -115,8 +115,8 @@ for trial in range(n_trials):
             norm_denoised = create_pipelined_noise(test_batch, stride, window_size).to(device)
             norm_denoised[:, :, non_hier_cols] = (x[:, :, non_hier_cols] - ((b_t / torch.sqrt(1 - ab_t)) * eps)) / torch.sqrt(at)
             norm_denoised[:, :, non_hier_cols] += vari
-            x[mask_exp]  = norm_denoised[mask_exp]
-            x[~mask_exp] = test_batch[~mask_exp]
+            x[mask_expanded]  = norm_denoised[mask_expanded]
+            x[~mask_expanded] = test_batch[~mask_expanded]
             x[1:, : (window_size - stride), :] = x.roll(1, 0)[1:, stride: window_size, :]
             if trial == 0:
                 num_ops += 1

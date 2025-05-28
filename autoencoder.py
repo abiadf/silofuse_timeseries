@@ -102,6 +102,7 @@ class Autoencoder(nn.Module):
         x_reconstructed = self.decoder(z_latent)
         return x_reconstructed
 
+    # to remove
     def forward_latent(self, x_input: torch.Tensor) -> torch.Tensor:
         """[for LDM] Combined encode and decode (for standard autoencoder training)"""
         latent        = self.encode_to_latent(x_input)
