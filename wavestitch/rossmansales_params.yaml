@@ -26,7 +26,7 @@ shared:
   s4_layernorm:        True
   propCycEnc:          False
 training:
-  epochs:              100
+  epochs:              300
 synthesis:
   synth_mask:          'C' # C = coarse, M = medium, F = fine
   n_trials:            1   # synthesis trials
@@ -36,19 +36,19 @@ autoencoder: # optimized from hyperparameter search
   layer2_dim:          9
   latent_dim:          4     # num of features in latent layer
   dropout_prob:        0.15
-  ae_training_epochs:  100
+  ae_training_epochs:  150
   ae_batch_size:       126
   ae_optimizer_lr:     0.0011
   weight_decay:        0.00001
-  training_patience:   70
-  scheduler_patience:  70
+  training_patience:   80
+  scheduler_patience:  80
   scheduler_mode:      'min'
   scheduler_factor:    0.8
 
 latent_diffusion:        # LDM
   latent_batch_size:          128    # 
   latent_lr:                  0.0001 # Learning rate specific to the latent diffusion model
-  latent_epochs:              100    # Number of epochs specific to the latent diffusion model
+  latent_epochs:              150    # Number of epochs specific to the latent diffusion model
   latent_beta_0:              0.0001 # Beta start for the latent diffusion schedule
   latent_beta_T:              0.02   # Beta end for the latent diffusion schedule
   latent_timesteps:           200    # Number of diffusion steps for the latent diffusion model

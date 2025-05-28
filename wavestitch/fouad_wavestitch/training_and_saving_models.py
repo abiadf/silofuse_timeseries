@@ -83,101 +83,6 @@ def train_and_save_diffusion(training_df, hierarchical_column_indices, diffusion
     return filepath, total_loss, in_dim, out_dim
 
 
-# def train_and_save_ldm_model(training_df, test_df, autoencoder, LDM_args, dataset_name, device, hierarchical_column_indices):
-#     with torch.no_grad():
-#         tensor_input    = torch.tensor(training_df.values, dtype=torch.float32).to(device)
-#         latent_features = autoencoder.encode_to_latent(tensor_input)
-#     latent_samples   = latent_features.cpu()
-#     latent_samples   = latent_samples.unsqueeze(-1)
-#     print("latent_samples:", latent_samples.shape)
-#     latent_dim       = latent_samples.shape[1]
-#     training_dataset = MyDataset(latent_samples)
-
-#     with torch.no_grad():
-#         tensor_test_input    = torch.tensor(test_df.values, dtype=torch.float32).to(device)
-#         latent_test_features = autoencoder.encode_to_latent(tensor_test_input)
-#     latent_test_samples   = latent_test_features.cpu()
-#     latent_test_samples   = latent_test_samples.unsqueeze(-1) # Shape: (batch_size, latent_dim, 1)
-#     print("latent_samples (test):", latent_test_samples.shape)
-#     test_dataset          = MyDataset(latent_test_samples)
-
-#     in_dim    = latent_dim
-#     out_dim   = latent_dim # if still masking hierarchicals in latent
-#     LDM_model = fetchModel(in_dim, out_dim, LDM_args).to(device)
-
-#     diffusion_config = fetchDiffusionConfig(LDM_args)
-#     # Move all tensors in diffusion_config to the correct device
-#     for k, v in diffusion_config.items():
-#         if isinstance(v, torch.Tensor):
-#             diffusion_config[k] = v.to(device)
-
-#     optimizer  = optim.AdamW(LDM_model.parameters(), lr=LDM_args.latent_lr)
-#     criterion  = nn.MSELoss()
-#     dataloader = DataLoader(training_dataset, batch_size=LDM_args.latent_batch_size, shuffle=True)
-#     test_dataloader = DataLoader(test_dataset, batch_size=LDM_args.latent_batch_size, shuffle=False) # No shuffle for test set
-
-#     # Get non-hierarchical columns (though commented out in the training loop, keeping for completeness if needed)
-#     all_indices      = np.arange(len(training_df.columns))
-#     remaining_indices= np.setdiff1d(all_indices, hierarchical_column_indices)
-#     non_hier_cols    = np.array(remaining_indices) # not used in the loop, remove if  unused
-
-#     def latent_diffusion_training_loop(epochs, dataloader, device, diffusion_config, model, optimizer, criterion) -> float:
-#         """Training loop of the Diffusion part of the LDM. NOTE: NO CONDITIONAL MASK for now"""
-#         model.train()
-#         for epoch in range(epochs):
-#             total_loss = 0.0
-#             for batch in dataloader:
-#                 batch = batch.to(device)
-#                 optimizer.zero_grad()
-#                 t           = torch.randint(diffusion_config['T'], (batch.shape[0],), device=device).long()
-#                 t           = t.unsqueeze(1)
-#                 alpha_bars  = diffusion_config['alpha_bars'].to(device)
-#                 coeff_1     = torch.sqrt(alpha_bars[t]).reshape(len(t), 1, 1)
-#                 coeff_2     = torch.sqrt(1 - alpha_bars[t]).reshape(len(t), 1, 1)
-#                 sigmas      = torch.randn_like(batch, device=device)
-#                 batch_noised= coeff_1 * batch + coeff_2 * sigmas
-#                 sigmas_predicted= model(batch_noised.permute(0, 2, 1), t)
-#                 loss = criterion(sigmas_predicted, sigmas)
-#                 loss.backward()
-#                 optimizer.step()
-#                 total_loss += loss.item()
-#             if (epoch + 1) % 5 == 0:
-#                 print(f'epoch: {epoch+1}/{epochs}, total loss: {total_loss:.4f}')
-#         return total_loss
-
-#     def latent_diffusion_test_loop(dataloader, device, diffusion_config, model, criterion) -> float:
-#         """Evaluation loop for the Diffusion part of the LDM."""
-#         model.eval() # Set model to evaluation mode
-#         total_test_loss = 0.0
-#         with torch.no_grad(): # No gradient calculation during evaluation
-#             for batch in dataloader:
-#                 batch     = batch.to(device)
-#                 t         = torch.randint(diffusion_config['T'], (batch.shape[0],), device=device).long().unsqueeze(1)
-#                 alpha_bars= diffusion_config['alpha_bars']
-#                 coeff_1   = torch.sqrt(alpha_bars[t]).reshape(len(t), 1, 1)
-#                 coeff_2   = torch.sqrt(1 - alpha_bars[t]).reshape(len(t), 1, 1)
-#                 sigmas    = torch.randn_like(batch, device=device)
-#                 batch_noised    = coeff_1 * batch + coeff_2 * sigmas
-#                 sigmas_predicted= model(batch_noised.permute(0, 2, 1), t)
-#                 loss            = criterion(sigmas_predicted, sigmas)
-#                 total_test_loss += loss.item()
-#         avg_test_loss = total_test_loss / len(dataloader)
-#         print(f'Test Loss: {avg_test_loss:.4f}')
-#         model.train() # Set model back to training mode
-#         return avg_test_loss
-
-#     total_train_loss = latent_diffusion_training_loop(LDM_args.latent_epochs, dataloader, device, diffusion_config, LDM_model, optimizer, criterion)
-#     total_test_loss  = latent_diffusion_test_loop(test_dataloader, device, diffusion_config, LDM_model, criterion)
-
-#     # Save model
-#     path     = f'saved_models/{dataset_name}/'
-#     filename = "ldm_model_prop.pth" if LDM_args.propCycEnc else "latent_model.pth"
-#     filepath = os.path.join(path, filename)
-#     os.makedirs(path, exist_ok=True)
-#     torch.save(LDM_model.state_dict(), filepath)
-
-#     return filepath, total_train_loss, total_test_loss, in_dim, out_dim, latent_dim
-
 class LDMTrainer:
     def __init__(self, autoencoder, LDM_args, dataset_name, device):
         self.autoencoder     = autoencoder
@@ -192,12 +97,12 @@ class LDMTrainer:
             if isinstance(v, torch.Tensor):
                 self.diffusion_config[k] = v.to(device)
 
-        self.criterion  = nn.MSELoss()
-        self.latent_dim = None # Will be set after data preparation
-        self.latent_scaler = StandardScaler()
+        self.criterion    = nn.MSELoss()
+        self.latent_dim   = None # Will be set after data preparation
+        self.latent_scaler= StandardScaler()
 
     def _prepare_latent_data(self, df):
-        """Encodes DataFrame data to latent space and prepares for DataLoader."""
+        """Encodes df data to latent space and prepares for DataLoader."""
         with torch.no_grad():
             tensor_input    = torch.tensor(df.values, dtype=torch.float32).to(self.device)
             latent_features = self.autoencoder.encode_to_latent(tensor_input)
@@ -234,7 +139,7 @@ class LDMTrainer:
                 epoch_loss += loss.item()
                 total_loss += loss.item() # Accumulate overall loss
 
-            if (epoch + 1) % 5 == 0:
+            if (epoch + 1) % 20 == 0:
                 print(f'Epoch: {epoch+1}/{self.LDM_args.latent_epochs}, Avg Epoch Loss: {epoch_loss / len(dataloader):.4f}')
         return total_loss / (len(dataloader) * self.LDM_args.latent_epochs) # Return average loss per batch over all epochs
 
@@ -281,7 +186,7 @@ class LDMTrainer:
         
         # Fit and transform training latents, then unsqueeze for DataLoader
         scaled_latent_samples_train_np = self.latent_scaler.fit_transform(unscaled_latent_features_train.numpy())
-        scaled_latent_samples_train = torch.tensor(scaled_latent_samples_train_np, dtype=torch.float32).unsqueeze(-1) # UNSQUEEZE HERE
+        scaled_latent_samples_train    = torch.tensor(scaled_latent_samples_train_np, dtype=torch.float32).unsqueeze(-1) # UNSQUEEZE HERE
         print(f"Scaled Latent samples (training): {scaled_latent_samples_train.shape}")
         training_dataset = MyDataset(scaled_latent_samples_train)
 
@@ -290,15 +195,15 @@ class LDMTrainer:
         
         # Transform test latents (do NOT fit), then unsqueeze for DataLoader
         scaled_latent_samples_test_np = self.latent_scaler.transform(unscaled_latent_features_test.numpy())
-        scaled_latent_samples_test = torch.tensor(scaled_latent_samples_test_np, dtype=torch.float32).unsqueeze(-1) # UNSQUEEZE HERE
+        scaled_latent_samples_test    = torch.tensor(scaled_latent_samples_test_np, dtype=torch.float32).unsqueeze(-1) # UNSQUEEZE HERE
         print(f"Scaled Latent samples (test): {scaled_latent_samples_test.shape}")
         test_dataset = MyDataset(scaled_latent_samples_test)
 
         # 2. Initialize Model and Optimizer
-        in_dim  = self.latent_dim
-        out_dim = self.latent_dim
-        self.LDM_model = fetchModel(in_dim, out_dim, self.LDM_args).to(self.device)
-        self.optimizer = optim.AdamW(self.LDM_model.parameters(), lr=self.LDM_args.latent_lr)
+        in_dim          = self.latent_dim
+        out_dim         = self.latent_dim
+        self.LDM_model  = fetchModel(in_dim, out_dim, self.LDM_args).to(self.device)
+        self.optimizer  = optim.AdamW(self.LDM_model.parameters(), lr=self.LDM_args.latent_lr)
         dataloader      = DataLoader(training_dataset, batch_size=self.LDM_args.latent_batch_size, shuffle=True)
         test_dataloader = DataLoader(test_dataset, batch_size=self.LDM_args.latent_batch_size, shuffle=False)
 
