@@ -1,15 +1,23 @@
-"""Train and save autoencoder"""
+"""Train and save models"""
 
 import os
 import numpy as np
+import pandas as pd
 from sklearn.preprocessing import StandardScaler
 import torch
-from torch import sqrt
+from torch import sqrt, from_numpy
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
+
 import autoencoder as ae
 from training_utils import MyDataset, fetchDiffusionConfig, fetchModel
+from time import perf_counter as timer # Using perf_counter for accurate timing
+from metasynth import metadataMask
+
+from timeit import default_timer as timer
+
+
 
 def train_and_save_autoencoder(train_dataset, test_dataset, ae_args, dataset_name, device):
     """input_size = # dataset features"""
@@ -81,6 +89,140 @@ def train_and_save_diffusion(training_df, hierarchical_column_indices, diffusion
     torch.save(model.state_dict(), filepath)
 
     return filepath, total_loss, in_dim, out_dim
+
+
+class Synthesizer:
+    def __init__(self, df, preprocessor, diffusion_args, dataset_name):
+        self.df           = df
+        self.preprocessor = preprocessor
+        self.args         = diffusion_args
+        self.dataset      = dataset_name
+        self.device       = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model        = None
+        self.test_loader  = None
+        self.mask_loader  = None
+        self.test_dataset = None
+        self.mask_dataset = None
+        self.non_hier_cols= None
+        self.hierarchical_column_indices = None
+        self.diffusion_config            = None
+        self.path = f'generated/{self.dataset}/{self.args.synth_mask}/'
+        os.makedirs(self.path, exist_ok=True)
+
+    @staticmethod
+    def decimal_places(series):
+        return series.apply(lambda x: len(str(x).split('.')[1]) if '.' in str(x) else 0).max()
+
+    def create_pipelined_noise(self, batch_shape):
+        total_rows = self.args.stride * (batch_shape[0] - 1) + self.args.window_size
+        sampled    = torch.normal(0, 1, (total_rows, batch_shape[2])).to(self.device)
+        return sampled.unfold(0, self.args.window_size, self.args.stride).transpose(1, 2)
+
+    def prepare_data_and_model(self):
+        np.random.seed(self.args.random_seed)
+        torch.manual_seed(self.args.random_seed)
+
+        end        = self.preprocessor.test_indices[-1]
+        start      = self.preprocessor.test_indices[0]
+        count      = ((end + 1 - self.args.window_size - start) // self.args.stride) + 1
+        tilde_start= end + 1 - self.args.window_size - (count * self.args.stride)
+        additional = start - tilde_start
+
+        test_df         = self.df.loc[self.preprocessor.train_indices[-additional:] + self.preprocessor.test_indices]
+        test_decoded    = self.preprocessor.cyclicDecode(test_df)
+        decimal_accuracy= {k: self.decimal_places(self.preprocessor.df_orig[k]) for k in test_decoded.columns}
+        metadata        = test_decoded[self.preprocessor.hierarchical_features_uncyclic]
+        rows_to_synth   = metadataMask(metadata, self.args.synth_mask, self.dataset)
+        real_df         = test_decoded[rows_to_synth]
+        real_df_out     = self.preprocessor.rescale(real_df).reset_index(drop=True).round(decimal_accuracy)
+        real_path       = os.path.join(self.path, 'real.csv')
+        if not os.path.exists(real_path):
+            real_df_out.to_csv(real_path)
+
+        data_tensor = from_numpy(test_df.values)
+        mask_tensor = from_numpy(rows_to_synth.values)
+        windows     = data_tensor.unfold(0, self.args.window_size, self.args.stride).transpose(1, 2)
+        masks       = mask_tensor.unfold(0, self.args.window_size, self.args.stride)
+
+        self.hierarchical_column_indices = test_df.columns.get_indexer(self.preprocessor.hierarchical_features_cyclic)
+        self.non_hier_cols= np.setdiff1d(np.arange(len(test_df.columns)), self.hierarchical_column_indices)
+        self.test_dataset = MyDataset(windows.float())
+        self.mask_dataset = MyDataset(masks)
+        self.test_loader  = DataLoader(self.test_dataset, batch_size=self.args.diff_batch_size)
+        self.mask_loader  = DataLoader(self.mask_dataset, batch_size=self.args.diff_batch_size)
+
+        in_dim     = len(test_df.columns)
+        out_dim    = len(self.non_hier_cols)
+        self.model = fetchModel(in_dim, out_dim, self.args).to(self.device)
+        self.diffusion_config = fetchDiffusionConfig(self.args)
+
+        model_path = f'saved_models/{self.dataset}/model_prop.pth' if self.args.propCycEnc else f'saved_models/{self.dataset}/model.pth'
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        self.model.eval()
+
+        return rows_to_synth, decimal_accuracy
+
+    @torch.no_grad()
+    def synthesize(self, n_trials=1):
+        rows_to_synth, decimal_accuracy = self.prepare_data_and_model()
+        num_ops    = 0
+        exec_times = []
+
+        for trial in range(n_trials):
+            start_time   = timer()
+            synth_tensor = torch.empty(0, self.test_dataset.inputs.shape[2]).to(self.device)
+            for idx, (test_batch, mask_batch) in enumerate(zip(self.test_loader, self.mask_loader)):
+                test_batch = test_batch.to(self.device)
+                mask_batch = mask_batch.to(self.device)
+                noise      = self.create_pipelined_noise(test_batch.shape)
+                x          = noise.clone()
+                x[:, :, self.hierarchical_column_indices] = test_batch[:, :, self.hierarchical_column_indices]
+                for step in reversed(range(self.diffusion_config['T'])):
+                    times = torch.full((test_batch.shape[0], 1), step).to(self.device)
+                    ab_t  = self.diffusion_config['alpha_bars'][step].to(self.device)
+                    ab_t1 = self.diffusion_config['alpha_bars'][step - 1].to(self.device) if step > 0 else None
+                    at    = self.diffusion_config['alphas'][step].to(self.device)
+                    b_t   = self.diffusion_config['betas'][step].to(self.device)
+                    sampled_noise = self.create_pipelined_noise(test_batch.shape)
+                    cached= torch.sqrt(ab_t) * test_batch + torch.sqrt(1 - ab_t) * sampled_noise
+                    mask_expanded = torch.zeros_like(test_batch, dtype=bool)
+                    for c in self.non_hier_cols:
+                        mask_expanded[:, :, c] = mask_batch
+                    x[~mask_expanded] = cached[~mask_expanded]
+                    x[:, :, self.hierarchical_column_indices] = test_batch[:, :, self.hierarchical_column_indices]
+                    eps = self.model(x, times).permute(0, 2, 1)
+                    variance = 0.0
+                    if step > 0:
+                        variance = b_t * ((1 - ab_t1) / (1 - ab_t)) * torch.normal(0, 1, size=eps.shape).to(self.device)
+                    norm_denoised = self.create_pipelined_noise(test_batch.shape)
+                    norm_denoised[:, :, self.non_hier_cols] = (x[:, :, self.non_hier_cols] - ((b_t / torch.sqrt(1 - ab_t)) * eps)) / torch.sqrt(at)
+                    norm_denoised[:, :, self.non_hier_cols] += variance
+                    x[mask_expanded]  = norm_denoised[mask_expanded]
+                    x[~mask_expanded] = test_batch[~mask_expanded]
+                    x[1:, : (self.args.window_size - self.args.stride), :] = x.roll(1, 0)[1:, self.args.stride: self.args.window_size, :]
+                    if trial == 0:
+                        num_ops += 1
+                if idx == 0:
+                    generated = torch.cat((x[0], x[1:, (self.args.window_size - self.args.stride):, :].reshape(-1, x.shape[2])), dim=0)
+                else:
+                    generated = x[:, (self.args.window_size - self.args.stride):, :].reshape(-1, x.shape[2])
+                synth_tensor = torch.cat((synth_tensor, generated), dim=0)
+
+            exec_times.append(timer() - start_time)
+            df_synth    = pd.DataFrame(synth_tensor.cpu().numpy(), columns=self.df.columns)
+            decoded     = self.preprocessor.decode(df_synth, rescale=True)
+            mask        = rows_to_synth.to_numpy() if hasattr(rows_to_synth, "to_numpy") else np.array(rows_to_synth)
+            synth_df_out= decoded[mask].round(decimal_accuracy)
+            suffix      = 'cycProp' if self.args.propCycEnc else 'cycStd'
+            synth_df_out.to_csv(f'{self.path}synth_hyacinth_pipeline_stride_{self.args.stride}_trial_{trial}_{suffix}.csv')
+            print(f"File {trial+1}/{n_trials} done")
+
+            if trial == 0:
+                with open(f'{self.path}denoiser_calls_pipeline_stride_{self.args.stride}_{suffix}.txt', 'w') as f:
+                    f.write(str(num_ops))
+
+        return synth_df_out, exec_times
+
 
 
 class LDMTrainer:

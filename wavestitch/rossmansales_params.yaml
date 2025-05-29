@@ -3,16 +3,16 @@ shared:
   dataset:             'RossmanSales'
   backbone:            'S4'
   random_seed:         42
-  data_split:          0.8  # train-test split
-  beta_0:              0.0001
-  beta_T:              0.02
-  timesteps:           200
+  data_split:          0.8       # train-test split
+  beta_0:              0.0001    # start noise value, non-0 as it can create NaN values
+  beta_T:              0.02      # end noise value
+  timesteps:           200       # num of diffusion steps per epoch
   hdim:                64
-  lr:                  0.0001
-  diff_batch_size:     1024
+  lr:                  0.0001    # learning rate for the optimizer
+  diff_batch_size:     1024      # number of samples per batch (into dataloader)
   layers:              4
-  window_size:         32 # >0, power of 2
-  stride:              1  # <= window_size
+  window_size:         32        # >0, power of 2
+  stride:              1         # <= window_size
   num_res_layers:      4
   res_channels:        64
   skip_channels:       64
@@ -26,26 +26,26 @@ shared:
   s4_layernorm:        True
   propCycEnc:          False
 training:
-  epochs:              300
+  epochs:              300        # num of diffusion training epochs
 synthesis:
-  synth_mask:          'C' # C = coarse, M = medium, F = fine
-  n_trials:            1   # synthesis trials
+  synth_mask:          'C'        # C = coarse, M = medium, F = fine
+  n_trials:            1          # synthesis trials
 
 autoencoder: # optimized from hyperparameter search
-  layer1_dim:          21    # size of hidden dimension
-  layer2_dim:          9
-  latent_dim:          4     # num of features in latent layer
+  layer1_dim:          21         # layer 1 nodes
+  layer2_dim:          9          # layer 2 nodes
+  latent_dim:          4          # num of features in latent layer, get this from data dimensionality
   dropout_prob:        0.15
-  ae_training_epochs:  150
-  ae_batch_size:       126
-  ae_optimizer_lr:     0.0011
-  weight_decay:        0.00001
-  training_patience:   80
+  ae_training_epochs:  150        # training epochs
+  ae_batch_size:       126        # number of samples per batch
+  ae_optimizer_lr:     0.0011     # learning rate for the optimizer
+  weight_decay:        0.00001    # for L2 regularization
+  training_patience:   80         # how many epochs with no improvement to stop training
   scheduler_patience:  80
-  scheduler_mode:      'min'
-  scheduler_factor:    0.8
+  scheduler_mode:      'min'      # min (max) reduces elarning rate when validation loss stops improving (starts increasing)
+  scheduler_factor:    0.8        # multiplies lr by this factor when validation loss plateaus
 
-latent_diffusion:        # LDM
+latent_diffusion:      # LDM
   latent_batch_size:          128    # 
   latent_lr:                  0.0001 # Learning rate specific to the latent diffusion model
   latent_epochs:              150    # Number of epochs specific to the latent diffusion model

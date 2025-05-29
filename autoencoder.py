@@ -47,12 +47,12 @@ class Autoencoder(nn.Module):
                     nn.Linear(self.input_size, self.layer1_dim),
                     nn.BatchNorm1d(self.layer1_dim),
                     # nn.ReLU(),
-                    nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
+                    nn.LeakyReLU(negative_slope=0.05),  # LeakyReLU instead of ReLU
                     nn.Dropout(self.dropout_prob),
                     nn.Linear(self.layer1_dim, self.layer2_dim),
                     nn.BatchNorm1d(self.layer2_dim),
                     # nn.ReLU(),
-                    nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
+                    nn.LeakyReLU(negative_slope=0.05),  # LeakyReLU instead of ReLU
                     nn.Dropout(self.dropout_prob),
                     nn.Linear(self.layer2_dim, self.latent_dim))
         return encoder
@@ -64,12 +64,12 @@ class Autoencoder(nn.Module):
         decoder = nn.Sequential(
                     nn.Linear(self.latent_dim, self.layer2_dim),
                     nn.BatchNorm1d(self.layer2_dim),
-                    nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
+                    nn.LeakyReLU(negative_slope=0.05),  # LeakyReLU instead of ReLU
                     # nn.ReLU(),
                     nn.Dropout(self.dropout_prob),
                     nn.Linear(self.layer2_dim, self.layer1_dim),
                     nn.BatchNorm1d(self.layer1_dim),
-                    nn.LeakyReLU(negative_slope=0.01),  # LeakyReLU instead of ReLU
+                    nn.LeakyReLU(negative_slope=0.05),  # LeakyReLU instead of ReLU
                     # nn.ReLU(),
                     nn.Dropout(self.dropout_prob),
                     nn.Linear(self.layer1_dim, self.input_size))
@@ -102,13 +102,6 @@ class Autoencoder(nn.Module):
         z_latent        = z_latent.to(device)
         x_reconstructed = self.decoder(z_latent)
         return x_reconstructed
-
-    # to remove
-    def forward_latent(self, x_input: torch.Tensor) -> torch.Tensor:
-        """[for LDM] Combined encode and decode (for standard autoencoder training)"""
-        latent        = self.encode_to_latent(x_input)
-        reconstructed = self.decode_from_latent(latent)
-        return reconstructed
 
 
 class TrainAutoencoder:
@@ -155,13 +148,13 @@ class TrainAutoencoder:
 
         for epoch in range(epochs):
             avg_epoch_loss = self._train_epoch(device, autoencoder, train_loader, optimizer)
-            if (epoch+1) % 20 == 0:
+            if (epoch+1) % 25 == 0:
                 print(f'Epoch [{epoch+1}/{epochs}], training loss: {avg_epoch_loss:.4f}')
 
             # Early stopping logic (if validation_loader is provided)
             if validation_loader is not None:
                 avg_val_loss = self._validation_epoch(device, autoencoder, validation_loader)
-                if (epoch+1) % 20 == 0:
+                if (epoch+1) % 25 == 0:
                     print(f'Validation loss: {avg_val_loss:.4f}')
                 scheduler.step(avg_val_loss)
                 if avg_val_loss < best_loss:
