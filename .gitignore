@@ -1,7 +1,8 @@
 .vscode/
 venv/
 myenv*/
-.DS_Store
+ASM_data/*
+*.DS_Store*
 *.ipynb_checkpoints
 *.$*.bkp
 .DS_Store
