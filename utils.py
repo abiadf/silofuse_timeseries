@@ -33,6 +33,22 @@ def get_frechet_distance(array1: np.ndarray, array2: np.ndarray) -> float:
     return float(fid)
 
 
+class AutocorrMetrics:
+    @staticmethod
+    def autocorr(x, lag):
+        x = x - x.mean()
+        return torch.sum(x[:-lag] * x[lag:]) / torch.sum(x * x) if lag < len(x) else torch.tensor(0.0)
+
+    @staticmethod
+    def autocorr_diff(x1, x2, lag):
+        diff = 0.0
+        for i in range(x1.shape[1]):  # over features/variables
+            ac1 = AutocorrMetrics.autocorr(x1[:, i], lag)
+            ac2 = AutocorrMetrics.autocorr(x2[:, i], lag)
+            diff += torch.abs(ac1 - ac2)
+        return diff / x1.shape[1]
+
+
 def get_zscore_of_1D_or_2D_array(original_data: np.ndarray, generated_data: np.ndarray, num_samples: int = 1000):
     """Performs one-sample z-test comparing generated to original data. Assumes dependent samples
     Parameters:

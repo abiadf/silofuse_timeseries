@@ -4,10 +4,12 @@ import os
 from types import SimpleNamespace
 import yaml
 
-dataset_name   = "RossmanSales" # "RossmanSales", "BeijingAirQuality", "", "", "PanamaElectricity"
-filenames_dict = {"RossmanSales": "rossmansales_params.yaml",
+dataset_name   = "RossmanSales" # "RossmanSales", "BeijingAirQuality", "PanamaEnergy", "MetroTraffic", "AustraliaTourism"
+filenames_dict = {"RossmanSales":      "rossmansales_params.yaml",
                   "BeijingAirQuality": "beijingairquality_params.yaml",
-                  "PanamaElectricity": "panama_electricity_params.yaml",}
+                  "PanamaEnergy":      "panama_energy_params.yaml",
+                  "MetroTraffic":      "metro_traffic_params.yaml",
+                  "AustraliaTourism":  "australia_tourism_params.yaml",}
 parent_dir     = "yaml_files"
 base_dir       = os.path.dirname(os.path.abspath(__file__))
 yaml_path      = os.path.join(base_dir, "..", "..", parent_dir, filenames_dict[dataset_name])
@@ -78,5 +80,4 @@ LDM_args = SimpleNamespace(
     s4_dstate          = wavestitch_yaml['latent_diffusion']['latent_s4_dstate'],
     s4_dropout         = wavestitch_yaml['latent_diffusion']['latent_s4_dropout'],
     propCycEnc         = wavestitch_yaml['latent_diffusion']['propCycEnc'],
-    num_samples        = wavestitch_yaml['latent_diffusion']['num_samples'],
-    )
+    num_samples        = wavestitch_yaml['latent_diffusion']['num_samples'],)

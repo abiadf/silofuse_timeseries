@@ -32,9 +32,9 @@ synthesis:
   n_trials:            1          # synthesis trials
 
 autoencoder: # optimized from hyperparameter search
-  layer1_dim:          21         # layer 1 nodes
-  layer2_dim:          9          # layer 2 nodes
-  latent_dim:          4          # num of features in latent layer, get this from data dimensionality
+  layer1_dim:          8 #21          # layer 1 nodes
+  layer2_dim:          5 #9          # layer 2 nodes
+  latent_dim:          2 #4          # num of features in latent layer, get this from data dimensionality
   dropout_prob:        0.15
   ae_training_epochs:  150        # training epochs
   ae_batch_size:       126        # number of samples per batch

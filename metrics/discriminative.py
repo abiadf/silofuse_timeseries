@@ -6,7 +6,7 @@ from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from tqdm.auto import tqdm, trange
 from typing import List, Tuple
-import RNN_params as disc_param
+import yaml_files.RNN_params as disc_param
 
 def extract_time_info(timeseries_data: np.ndarray) -> Tuple[np.ndarray, int]:
     max_seq_len = timeseries_data.shape[1]  # go for dim 2
