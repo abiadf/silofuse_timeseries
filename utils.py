@@ -33,6 +33,38 @@ def get_frechet_distance(array1: np.ndarray, array2: np.ndarray) -> float:
     return float(fid)
 
 
+def get_zscore_of_1D_or_2D_array(original_data: np.ndarray, generated_data: np.ndarray, num_samples: int = 1000):
+    """Performs one-sample z-test comparing generated to original data. Assumes dependent samples
+    Parameters:
+    - original_data (1D or 2D): baseline real dataset
+    - generated_data (1D or 2D): generated dataset
+    - num_samples (int): number of generated samples per test iteration    
+    Returns:
+    - z_mean: average z-score over iterations
+    - z_std: std dev of z-scores"""
+
+    num_iterations     = 100
+    original_data_mean = original_data.mean()
+    original_data_std  = original_data.std()
+    z_score_samples    = np.zeros(num_iterations)
+    generated_data_flat= generated_data.flatten() if generated_data.ndim == 2 else generated_data
+
+    eps = 1e-8 # threshold to catch near-0 std
+    for i in range(num_iterations):
+        max_available = len(generated_data_flat)
+        sample_size   = min(num_samples, max_available)
+        replace       = sample_size > max_available
+        samples_array = np.random.choice(generated_data_flat, sample_size, replace=replace)
+        mean_samples  = samples_array.mean()
+        if original_data_std < eps:
+            z_score_sample = 0.0
+        else:
+            # z_score_sample = (mean_samples - original_data_mean) / (original_data_std / (num_samples**0.5))
+            z_score_sample = (mean_samples - original_data_mean) / (original_data_std / np.sqrt(sample_size))
+        z_score_samples[i] = z_score_sample
+    return z_score_samples.mean(), z_score_samples.std()
+
+
 class Losses:
     @staticmethod
     def compute_MSE_loss(x_input: torch.Tensor, x_reconstructed: torch.Tensor) -> torch.Tensor:

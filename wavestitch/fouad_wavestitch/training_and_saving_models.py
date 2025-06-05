@@ -18,77 +18,105 @@ from metasynth import metadataMask
 from timeit import default_timer as timer
 
 
+class AutoencoderModel:
+    @staticmethod
+    def train_autoencoder(train_dataset, test_dataset, ae_args, device):
+        input_size  = train_dataset[0][0].shape[0]
+        train_loader= DataLoader(train_dataset, batch_size=ae_args.ae_batch_size, shuffle=True)
+        test_loader = DataLoader(test_dataset, batch_size=ae_args.ae_batch_size, shuffle=False)
+        model       = ae.Autoencoder(input_size, ae_args.ae_layer1_dim, ae_args.ae_layer2_dim,
+                                     ae_args.ae_latent_dim, ae_args.ae_dropout_prob).to(device)
+        optimizer   = torch.optim.AdamW(model.parameters(), lr=ae_args.ae_optimizer_lr, weight_decay=ae_args.ae_weight_decay)
+        scheduler   = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, ae_args.ae_scheduler_mode,
+                                                                 patience=ae_args.ae_scheduler_patience,
+                                                                 factor=ae_args.ae_scheduler_factor)
+        trainer     = ae.TrainAutoencoder()
+        best_loss   = trainer.train_autoencoder(device, model, ae_args.ae_training_epochs, train_loader, optimizer,
+                                               scheduler, validation_loader=test_loader, patience=ae_args.ae_training_patience)
+        return model, best_loss, input_size
 
-def train_and_save_autoencoder(train_dataset, test_dataset, ae_args, dataset_name, device):
-    """input_size = # dataset features"""
-    input_size   = train_dataset[0][0].shape[0]
-    train_loader = DataLoader(train_dataset, batch_size=ae_args.ae_batch_size, shuffle=True)
-    test_loader  = DataLoader(test_dataset, batch_size=ae_args.ae_batch_size, shuffle=False)
-    autoencoder  = ae.Autoencoder(input_size, ae_args.ae_layer1_dim, ae_args.ae_layer2_dim, ae_args.ae_latent_dim, ae_args.ae_dropout_prob)
-    optimizer    = torch.optim.AdamW(autoencoder.parameters(), lr=ae_args.ae_optimizer_lr, weight_decay=ae_args.ae_weight_decay)
-    scheduler    = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, ae_args.ae_scheduler_mode, patience=ae_args.ae_scheduler_patience, factor=ae_args.ae_scheduler_factor)
+    @staticmethod
+    def save_autoencoder(model, dataset_name):
+        path = 'saved_models/autoencoder/'
+        os.makedirs(path, exist_ok=True)
+        filename = f"{dataset_name}_autoencoder.pth"
+        filepath = os.path.join(path, filename)
+        torch.save(model.state_dict(), filepath)
+        return filepath
 
-    trainer   = ae.TrainAutoencoder()
-    best_loss = trainer.train_autoencoder(device, autoencoder, ae_args.ae_training_epochs, train_loader, optimizer, scheduler,
-                                          validation_loader=test_loader, patience=ae_args.ae_training_patience)
-    path = 'saved_models/autoencoder/'
-    os.makedirs(path, exist_ok=True)
-    filename = f"{dataset_name}_autoencoder.pth"
-    filepath = os.path.join(path, filename)
-    torch.save(autoencoder.state_dict(), filepath)
-    return filepath, input_size
+    @staticmethod
+    def load_autoencoder(filepath, input_size, ae_args, device):
+        model = ae.Autoencoder(input_size, ae_args.ae_layer1_dim, ae_args.ae_layer2_dim,
+                               ae_args.ae_latent_dim, ae_args.ae_dropout_prob).to(device)
+        state_dict = torch.load(filepath, map_location=device)
+        model.load_state_dict(state_dict)
+        model.eval()
+        return model
 
 
-def train_and_save_diffusion(training_df, hierarchical_column_indices, diffusion_args, dataset, device):
-    d_vals_tensor    = torch.from_numpy(training_df.values.astype(np.float32))
-    training_samples = d_vals_tensor.unfold(0, diffusion_args.window_size, 1).transpose(1, 2)
-    in_dim           = training_df.shape[1]
-    out_dim          = in_dim - len(hierarchical_column_indices)
-    training_dataset = MyDataset(training_samples.float())
-    model            = fetchModel(in_dim, out_dim, diffusion_args).to(device)
-    diffusion_config = fetchDiffusionConfig(diffusion_args)
-    optimizer        = optim.Adam(model.parameters(), lr=diffusion_args.lr)
-    criterion        = nn.MSELoss()
-    dataloader       = DataLoader(training_dataset, batch_size=diffusion_args.diff_batch_size, shuffle=True)
-    all_indices      = torch.arange(len(training_df.columns))
-    remaining_indices= [i for i in range(len(training_df.columns)) if i not in hierarchical_column_indices]
-    non_hier_cols    = torch.tensor(remaining_indices)
+class DiffusionModel:
+    @staticmethod
+    def train_diffusion(training_df, hierarchical_column_indices, diffusion_args, device):
+        d_vals_tensor    = torch.from_numpy(training_df.values.astype(np.float32))
+        training_samples = d_vals_tensor.unfold(0, diffusion_args.window_size, 1).transpose(1, 2)
+        in_dim           = training_df.shape[1]
+        out_dim          = in_dim - len(hierarchical_column_indices)
+        training_dataset = MyDataset(training_samples.float())
+        model            = fetchModel(in_dim, out_dim, diffusion_args).to(device)
+        diffusion_config = fetchDiffusionConfig(diffusion_args)
+        optimizer        = optim.Adam(model.parameters(), lr=diffusion_args.lr)
+        criterion        = nn.MSELoss()
+        dataloader       = DataLoader(training_dataset, batch_size=diffusion_args.diff_batch_size, shuffle=True)
+        all_indices      = torch.arange(len(training_df.columns))
+        remaining_indices= [i for i in range(len(training_df.columns)) if i not in hierarchical_column_indices]
+        non_hier_cols    = torch.tensor(remaining_indices)
 
-    def training_loop():
-        for epoch in range(diffusion_args.epochs):
-            total_loss = 0.0
-            for batch in dataloader:
-                batch     = batch.to(device)
-                t         = torch.randint(diffusion_config['T'], (batch.shape[0],), device=device)
-                sigmas    = torch.randn(batch.shape, device=device)
-                alpha_bars= diffusion_config['alpha_bars'].to(device)
-                coeff_1   = sqrt(alpha_bars[t]).reshape(len(t), 1, 1)
-                coeff_2   = sqrt(1 - alpha_bars[t]).reshape(len(t), 1, 1)
+        def training_loop():
+            for epoch in range(diffusion_args.epochs):
+                total_loss = 0.0
+                for batch in dataloader:
+                    batch     = batch.to(device)
+                    t         = torch.randint(diffusion_config['T'], (batch.shape[0],), device=device)
+                    sigmas    = torch.randn(batch.shape, device=device)
+                    alpha_bars= diffusion_config['alpha_bars'].to(device)
+                    coeff_1   = sqrt(alpha_bars[t]).reshape(len(t), 1, 1)
+                    coeff_2   = sqrt(1 - alpha_bars[t]).reshape(len(t), 1, 1)
 
-                conditional_mask = torch.ones(batch.shape, device=device)
-                conditional_mask[:, :, non_hier_cols] = 0
+                    conditional_mask = torch.ones(batch.shape, device=device)
+                    conditional_mask[:, :, non_hier_cols] = 0
 
-                batch_noised    = (1 - conditional_mask) * (coeff_1 * batch + coeff_2 * sigmas) + conditional_mask * batch
-                t               = t.reshape(-1, 1)
-                sigmas_predicted= model(batch_noised, t)
-                optimizer.zero_grad()
-                sigmas_permuted = sigmas[:, :, non_hier_cols].permute(0, 2, 1).to(device)
-                loss            = criterion(sigmas_predicted, sigmas_permuted)
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
-            if (epoch + 1) % 10 == 0:
-                print(f'epoch: {epoch+1}/{diffusion_args.epochs}, total loss: {total_loss}')
-        return total_loss
+                    batch_noised    = (1 - conditional_mask) * (coeff_1 * batch + coeff_2 * sigmas) + conditional_mask * batch
+                    t               = t.reshape(-1, 1)
+                    sigmas_predicted= model(batch_noised, t)
+                    optimizer.zero_grad()
+                    sigmas_permuted = sigmas[:, :, non_hier_cols].permute(0, 2, 1).to(device)
+                    loss            = criterion(sigmas_predicted, sigmas_permuted)
+                    loss.backward()
+                    optimizer.step()
+                    total_loss += loss.item()
+                if (epoch + 1) % 10 == 0:
+                    print(f'epoch: {epoch+1}/{diffusion_args.epochs}, total loss: {total_loss}')
+            return total_loss
+        total_loss= training_loop()
+        return model, total_loss, in_dim, out_dim
 
-    total_loss= training_loop()
-    path      = f'saved_models/{dataset}/'
-    os.makedirs(path, exist_ok=True)
-    filename  = "model_prop.pth" if diffusion_args.propCycEnc else "model.pth"
-    filepath  = os.path.join(path, filename)
-    torch.save(model.state_dict(), filepath)
+    @staticmethod
+    def save_diffusion_model(model, dataset, diffusion_args):
+        path = f'saved_models/{dataset}/'
+        os.makedirs(path, exist_ok=True)
+        filename = "model_prop.pth" if diffusion_args.propCycEnc else "model.pth"
+        filepath = os.path.join(path, filename)
+        torch.save(model.state_dict(), filepath)
+        return filepath
 
-    return filepath, total_loss, in_dim, out_dim
+    @staticmethod
+    def load_diffusion_model(filepath, in_dim, out_dim, diffusion_args, device):
+        model      = fetchModel(in_dim, out_dim, diffusion_args).to(device)
+        state_dict = torch.load(filepath, map_location=device)
+        state_dict = {k: v.clone() for k, v in state_dict.items()}
+        model.load_state_dict(state_dict)
+        model.eval()
+        return model
 
 
 class Synthesizer:
@@ -159,7 +187,6 @@ class Synthesizer:
         model_path = f'saved_models/{self.dataset}/model_prop.pth' if self.args.propCycEnc else f'saved_models/{self.dataset}/model.pth'
         self.model.load_state_dict(torch.load(model_path, map_location=self.device))
         self.model.eval()
-
         return rows_to_synth, decimal_accuracy
 
     @torch.no_grad()

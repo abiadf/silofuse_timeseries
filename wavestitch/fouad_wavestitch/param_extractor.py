@@ -1,15 +1,18 @@
 """Set dataset and get parameters from yaml file for each of the autoencoder, diffusion, and LDM diffusion"""
 
+import os
 from types import SimpleNamespace
 import yaml
 
-dataset_name = "RossmanSales" # "RossmanSales", "BeijingAirQuality", "", "", "PanamaElectricity"
-
+dataset_name   = "RossmanSales" # "RossmanSales", "BeijingAirQuality", "", "", "PanamaElectricity"
 filenames_dict = {"RossmanSales": "rossmansales_params.yaml",
                   "BeijingAirQuality": "beijingairquality_params.yaml",
                   "PanamaElectricity": "panama_electricity_params.yaml",}
+parent_dir     = "yaml_files"
+base_dir       = os.path.dirname(os.path.abspath(__file__))
+yaml_path      = os.path.join(base_dir, "..", "..", parent_dir, filenames_dict[dataset_name])
 
-with open(filenames_dict[dataset_name], 'r') as wavestitch_file:
+with open(yaml_path, 'r') as wavestitch_file:
     wavestitch_yaml = yaml.safe_load(wavestitch_file)
 
 ae_args = SimpleNamespace(
