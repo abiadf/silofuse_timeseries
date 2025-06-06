@@ -1,4 +1,5 @@
-"""Module designing the autoencoder (AE) of `undercomplete` type, consisting of 2 components, encoder and decoder, both feedforward NN. The encoder compresses input data into latent space, and decoder aims to reconstruct the input data from latent space. Because the latent data is compressed, the encoder's output dimensions are less than its input dimensions (the opposite holds for the decoder). The AE's goodness is measured with a 'reconstruction loss' between input and output data; we iterate until the error is low enough. Useful hyperparams:
+"""Module designing the autoencoder (AE) of `undercomplete` type, consisting of 2 components, encoder and decoder, both feedforward NN. The encoder compresses input data into latent space, and decoder aims to reconstruct the input data from latent space. Because the latent data is compressed, the encoder's output dimensions are less than its input dimensions (the opposite holds for the decoder). The AE's goodness is measured with a 'reconstruction loss' between input and output data; we iterate until the error is low enough.
+Useful hyperparams:
 1. # layers for encoder/decoder NN
 2. # nodes for each layer
 3. size of latent space (smaller = more info lost)"""
@@ -47,12 +48,12 @@ class Autoencoder(nn.Module):
                     nn.Linear(self.input_size, self.layer1_dim),
                     nn.BatchNorm1d(self.layer1_dim),
                     # nn.ReLU(),
-                    nn.LeakyReLU(negative_slope=0.05),  # LeakyReLU instead of ReLU
+                    nn.LeakyReLU(negative_slope=0.05), # LeakyReLU instead of ReLU
                     nn.Dropout(self.dropout_prob),
                     nn.Linear(self.layer1_dim, self.layer2_dim),
                     nn.BatchNorm1d(self.layer2_dim),
                     # nn.ReLU(),
-                    nn.LeakyReLU(negative_slope=0.05),  # LeakyReLU instead of ReLU
+                    nn.LeakyReLU(negative_slope=0.05), # LeakyReLU instead of ReLU
                     nn.Dropout(self.dropout_prob),
                     nn.Linear(self.layer2_dim, self.latent_dim))
         return encoder
@@ -64,19 +65,20 @@ class Autoencoder(nn.Module):
         decoder = nn.Sequential(
                     nn.Linear(self.latent_dim, self.layer2_dim),
                     nn.BatchNorm1d(self.layer2_dim),
-                    nn.LeakyReLU(negative_slope=0.05),  # LeakyReLU instead of ReLU
+                    nn.LeakyReLU(negative_slope=0.05), # LeakyReLU instead of ReLU
                     # nn.ReLU(),
                     nn.Dropout(self.dropout_prob),
                     nn.Linear(self.layer2_dim, self.layer1_dim),
                     nn.BatchNorm1d(self.layer1_dim),
-                    nn.LeakyReLU(negative_slope=0.05),  # LeakyReLU instead of ReLU
+                    nn.LeakyReLU(negative_slope=0.05), # LeakyReLU instead of ReLU
                     # nn.ReLU(),
                     nn.Dropout(self.dropout_prob),
                     nn.Linear(self.layer1_dim, self.input_size))
         return decoder
 
     def forward(self, x_input: torch.Tensor) -> torch.Tensor:
-        """Forward pass through the autoencoder (encoder + decoder). NOTE we also add a skip connection
+        """Forward pass through the autoencoder (encoder + decoder).
+        NOTE we also add a skip connection
         - x_input (torch.Tensor): input tensor to encode and reconstruct
         - encoder (nn.Module): encoder model
         - decoder (nn.Module): decoder model

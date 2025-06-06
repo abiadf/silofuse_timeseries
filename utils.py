@@ -84,20 +84,18 @@ def get_zscore_of_1D_or_2D_array(original_data: np.ndarray, generated_data: np.n
 class Losses:
     @staticmethod
     def compute_MSE_loss(x_input: torch.Tensor, x_reconstructed: torch.Tensor) -> torch.Tensor:
-        """Computes reconstruction loss (MSE) between input and reconstructed output
+        """Computes loss (MSE) between input and reconstructed output
         - x_in (torch.Tensor): Original input
         - x_out (torch.Tensor): Reconstructed input
         - torch.Tensor: Scalar loss value"""
-        # MSE
         return F.mse_loss(x_reconstructed, x_input)
 
     @staticmethod
     def compute_MAE_loss(x_input: torch.Tensor, x_reconstructed: torch.Tensor) -> torch.Tensor:
-        """Computes reconstruction loss (MAE) between input and reconstructed output
+        """Computes loss (MAE) between input and reconstructed output
         - x_in (torch.Tensor): Original input
         - x_out (torch.Tensor): Reconstructed input
         - torch.Tensor: Scalar loss value"""
-        # MAE
         return F.l1_loss(x_reconstructed, x_input)
 
 

@@ -1,6 +1,6 @@
 import numpy as np
-import torch
 import pickle
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
@@ -23,59 +23,60 @@ the cauchy kernel.'''
 try:  # Try CUDA extension
     from extensions.cauchy.cauchy import cauchy_mult
     # import cauchy_mult
-
     has_cauchy_extension = True
 except:
     print("CUDA extension for cauchy multiplication not found. Install by going to extensions/cauchy/ and running `python setup.py install`. This should speed up end-to-end training by 10-50%")
     has_cauchy_extension = False
 
-try:  # Try pykeops
-    import pykeops
-    from pykeops.torch import Genred
+has_pykeops = False
+if torch.cuda.is_available():
+    try:  # Try pykeops
+        import pykeops
+        from pykeops.torch import Genred
+        has_pykeops = True
 
-    has_pykeops = True
+        def cauchy_conj(v, z, w):
+            """ Pykeops version """
+            expr_num = 'z * ComplexReal(v) - Real2Complex(Sum(v * w))'
+            expr_denom = 'ComplexMult(z-w, z-Conj(w))'
 
+            cauchy_mult = Genred(
+                f'ComplexDivide({expr_num}, {expr_denom})',
+                # expr_num,
+                # expr_denom,
+                [
+                    'v = Vj(2)',
+                    'z = Vi(2)',
+                    'w = Vj(2)',
+                ],
+                reduction_op='Sum',
+                axis=1,
+                # dtype='float32' if v.dtype == torch.cfloat else 'float64',
+            )
 
-    def cauchy_conj(v, z, w):
-        """ Pykeops version """
-        expr_num = 'z * ComplexReal(v) - Real2Complex(Sum(v * w))'
-        expr_denom = 'ComplexMult(z-w, z-Conj(w))'
+            v, z, w = _broadcast_dims(v, z, w)
+            v = _c2r(v)
+            z = _c2r(z)
+            w = _c2r(w)
 
-        cauchy_mult = Genred(
-            f'ComplexDivide({expr_num}, {expr_denom})',
-            # expr_num,
-            # expr_denom,
-            [
-                'v = Vj(2)',
-                'z = Vi(2)',
-                'w = Vj(2)',
-            ],
-            reduction_op='Sum',
-            axis=1,
-            # dtype='float32' if v.dtype == torch.cfloat else 'float64',
-        )
+            r = 2 * cauchy_mult(v, z, w, backend='GPU')
+            return _r2c(r)
 
-        v, z, w = _broadcast_dims(v, z, w)
-        v = _c2r(v)
-        z = _c2r(z)
-        w = _c2r(w)
+    except ImportError:
+        # has_pykeops = False
+        pass  # keep has_pykeops = False
 
-        r = 2 * cauchy_mult(v, z, w, backend='GPU')
-        return _r2c(r)
-
-except ImportError:
-    has_pykeops = False
     if not has_cauchy_extension:
         print("Falling back on slow Cauchy kernel. Install at least one of pykeops or the CUDA extension for efficiency.")
 
-        def cauchy_slow(v, z, w):
-            """
-            v, w: (..., N)
-            z: (..., L)
-            returns: (..., L)
-            """
-            cauchy_matrix = v.unsqueeze(-1) / (z.unsqueeze(-2) - w.unsqueeze(-1))  # (... N L)
-            return torch.sum(cauchy_matrix, dim=-2)
+def cauchy_slow(v, z, w):
+    """
+    v, w: (..., N)
+    z: (..., L)
+    returns: (..., L)
+    """
+    cauchy_matrix = v.unsqueeze(-1) / (z.unsqueeze(-2) - w.unsqueeze(-1))  # (... N L)
+    return torch.sum(cauchy_matrix, dim=-2)
 
 
 def _broadcast_dims(*tensors):
@@ -619,7 +620,8 @@ class SSKernelNPLR(nn.Module):
         # Calculate resolvent at omega
         if has_cauchy_extension and z.dtype == torch.cfloat:
             r = cauchy_mult(v, z, w, symmetric=True)
-        elif has_pykeops:
+        # elif has_pykeops:
+        elif has_pykeops and z.device.type == "cuda":
             r = cauchy_conj(v, z, w)
         else:
             r = cauchy_slow(v, z, w)
