@@ -1,8 +1,10 @@
+catboost
 einops
 opt-einsum
 # fastdtw
 jupyter
 ipykernel
+lightgbm
 matplotlib
 metasynth
 numpy
@@ -19,7 +21,7 @@ PyYAML
 pykeops
 polars
 umap-learn # not umap
-
+xgboost
 
 # anyio==4.9.0
 # argon2-cffi==23.1.0
