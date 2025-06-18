@@ -1,6 +1,8 @@
 
 import polars as pl
 
+print(1)
+
 class LogFilesProcessor:
     def __init__(self, common_id_cols_mod):
         self.COMMON_ID_COLS_MOD = common_id_cols_mod
