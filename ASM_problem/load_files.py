@@ -136,7 +136,7 @@ class WaferFilesProcessor:
 
     @staticmethod
     def split_wafer_df_by_rc(wafer_df: pl.DataFrame) -> dict:
-        """Splits wafer_df by the 'RC' col values and returns a dict of dfs, each has as key the RC value (1-4)"""
+        """Splits wafer_df by the 'RC' col values and returns a dict of dfs, each has as key (0-3) and wafer/RC value (1-4)"""
 
         # wafer_df_dict = {i: df.with_columns(pl.lit(i).alias("wafer"))
         #                  for i, (_, df) in enumerate(wafer_df.partition_by("RC", as_dict=True).items())}
@@ -148,9 +148,9 @@ class WaferFilesProcessor:
 
         wafer_df_dict = {}
         for rc_val in wafer_df["RC"].unique():
-            df_subset            = wafer_df.filter(pl.col("RC") == rc_val)
-            wafer_df_dict[rc_val]= df_subset.rename({"RC": "wafer"})
-
+            df_subset = wafer_df.filter(pl.col("RC") == rc_val).with_columns(
+                pl.col("RC").alias("wafer"))  # keep original RC values in the column
+            wafer_df_dict[int(rc_val) - 1] = df_subset
         return wafer_df_dict
 
 
