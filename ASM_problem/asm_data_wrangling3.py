@@ -13,9 +13,7 @@ if not modules["numpy"]:
 if not modules["polars"]:
     import polars as pl
 
-import gc
 import catboost as cb
-import lightgbm as lgb
 from lightgbm import LGBMRegressor, early_stopping
 import xgboost as xgb
 import matplotlib.pyplot as plt
@@ -26,13 +24,13 @@ from sklearn.multioutput import MultiOutputRegressor
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 # from torch.utils.data import Dataset, DataLoader, TensorDataset, random_split
 from utils import Losses, DimensionalityEstimator
-from ASM_problem.load_files import LogFilesProcessor, WaferFilesProcessor
+from ASM_problem.load_and_rename_files import LogFilesProcessor, WaferFilesProcessor
 from ASM_problem.prediction_methods import MultiOutputModelPredictor, DataPreprocessor
 from typing import List, Union
 
-device  = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 from key_params import main_folder, NUM_WAFERS, dict_of_wafer_files, dict_of_log_files, step_col_name, COMMON_ID_COLS, COMMON_ID_COLS_MOD
+log_processor = LogFilesProcessor(COMMON_ID_COLS_MOD, COMMON_ID_COLS)
+device  = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def load_and_preprocess_wafer_data(dict_of_wafer_files, main_folder: str, save: bool = False) -> tuple:
     """Merge water files, split by RC, and create y and radius dataframes"""
@@ -51,9 +49,7 @@ def load_and_preprocess_wafer_data(dict_of_wafer_files, main_folder: str, save: 
             values="Radius (mm)", index="marathon_run", on="radius_idx", aggregate_function="first").sort("marathon_run")
     return master_df, wafer_df_dict, y_dict, radius_wide_dict
 
-log_processor = LogFilesProcessor(COMMON_ID_COLS_MOD, COMMON_ID_COLS)
-
-def load_and_process_log_files(dict_of_log_files,unique_marathon_runs_list: list, step_col_name: str,main_folder: str,save: bool = False) -> pl.DataFrame:
+def load_and_process_log_files(dict_of_log_files, log_processor: LogFilesProcessor, unique_marathon_runs_list: list, step_col_name: str,main_folder: str,save: bool = False) -> pl.DataFrame:
     """Read all stepfile CSVs, concat, then optionally save to parquet"""
     df_list = []
 
@@ -75,7 +71,7 @@ def load_and_process_log_files(dict_of_log_files,unique_marathon_runs_list: list
         log_df.write_parquet(f"{main_folder}/parquet_files/master_log_file.parquet")
     return log_df
 
-def split_and_save_log_df_by_wafer(log_df, num_wafers, main_folder) -> None:
+def split_and_save_log_df_by_wafer(log_df, num_wafers, main_folder, log_processor: LogFilesProcessor) -> None:
     """Split log_df into 4 parquet files, 1 for each wafer.
     saving to parquet is easier to handle than a dict of dataframes"""
 
@@ -129,7 +125,7 @@ def _compute_log_df_grouped_stats(log_df: pl.DataFrame, col_to_group_by: Union[s
     return result_df
 
 def train_models(y_df_dict, radius_wide_dict, main_folder, num_wafers, device):
-    predictor = MultiOutputModelPredictor(device)
+    predictor    = MultiOutputModelPredictor(device)
     preprocessor = DataPreprocessor()
 
     total_rmse_lgb, total_rmse_cat = 0, 0
@@ -150,7 +146,7 @@ def train_models(y_df_dict, radius_wide_dict, main_folder, num_wafers, device):
         print(f"LGBM RMSE: {rmse_lgb:.3f}")
         total_rmse_lgb += rmse_lgb
 
-        rmse_cat, _ = predictor.predict_catboost(X_train, y_train, X_val, y_val, device)
+        rmse_cat, _ = predictor.predict_catboost(X_train, y_train, X_val, y_val)
         print(f"Catboost RMSE: {rmse_cat:.3f}")
         total_rmse_cat += rmse_cat
 
@@ -161,8 +157,8 @@ def train_models(y_df_dict, radius_wide_dict, main_folder, num_wafers, device):
 """ML predictions"""
 master_df, wafer_df_dict, y_df_dict, radius_wide_dict=load_and_preprocess_wafer_data(dict_of_wafer_files, main_folder, save=False)
 unique_marathon_runs_list = list(master_df["marathon_run"].unique())
-log_df = load_and_process_log_files(dict_of_log_files, unique_marathon_runs_list, step_col_name, main_folder, save=False)
-split_and_save_log_df_by_wafer(log_df, NUM_WAFERS, main_folder)
+log_df = load_and_process_log_files(dict_of_log_files, log_processor, unique_marathon_runs_list, step_col_name, main_folder, save=False)
+split_and_save_log_df_by_wafer(log_df, NUM_WAFERS, main_folder, log_processor)
 train_models(y_df_dict, radius_wide_dict, main_folder, NUM_WAFERS, device)
 
 

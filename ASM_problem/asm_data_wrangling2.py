@@ -26,7 +26,7 @@ from sklearn.multioutput import MultiOutputRegressor
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 # from torch.utils.data import Dataset, DataLoader, TensorDataset, random_split
 from utils import Losses, DimensionalityEstimator
-from ASM_problem.load_files import LogFilesProcessor, WaferFilesProcessor
+from ASM_problem.load_and_rename_files import LogFilesProcessor, WaferFilesProcessor
 from ASM_problem.prediction_methods import MultiOutputModelPredictor, DataPreprocessor
 from typing import List, Union
 
