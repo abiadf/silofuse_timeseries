@@ -13,17 +13,12 @@ if not modules["numpy"]:
 if not modules["polars"]:
     import polars as pl
 
-import catboost as cb
-from lightgbm import LGBMRegressor, early_stopping
-import xgboost as xgb
+import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
-from sklearn.multioutput import MultiOutputRegressor
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 # from torch.utils.data import Dataset, DataLoader, TensorDataset, random_split
-from utils import Losses, DimensionalityEstimator
 from ASM_problem.load_and_rename_files import LogFilesProcessor, WaferFilesProcessor
 from ASM_problem.prediction_methods import MultiOutputModelPredictor, DataPreprocessor
 from typing import List, Union
@@ -71,7 +66,7 @@ def load_and_process_log_files(dict_of_log_files, log_processor: LogFilesProcess
         log_df.write_parquet(f"{main_folder}/parquet_files/master_log_file.parquet")
     return log_df
 
-def split_and_save_log_df_by_wafer(log_df, num_wafers, main_folder, log_processor: LogFilesProcessor) -> None:
+def split_and_save_log_df_by_wafer(log_df, num_wafers, main_folder, log_processor: LogFilesProcessor, overwrite = False) -> None:
     """Split log_df into 4 parquet files, 1 for each wafer.
     saving to parquet is easier to handle than a dict of dataframes"""
 
@@ -92,7 +87,10 @@ def split_and_save_log_df_by_wafer(log_df, num_wafers, main_folder, log_processo
 
         # Drop constant-valued numeric columns
         df = log_processor.remove_constant_valued_cols(df)
-        df.write_parquet(f"{main_folder}/parquet_files/wafer_{i+1}_log.parquet")
+
+        filepath = f"{main_folder}/parquet_files/wafer_{i+1}_log.parquet"
+        if overwrite or not os.path.exists(filepath):
+            df.write_parquet(filepath)
 
 def _compute_log_df_grouped_stats(log_df: pl.DataFrame, col_to_group_by: Union[str, List[str]]):
     """Group log_df by specified column(s) and compute statistics (mean, std, min, max, median, skew, kurtosis) for numeric columns
@@ -129,36 +127,45 @@ def train_models(y_df_dict, radius_wide_dict, main_folder, num_wafers, device):
     preprocessor = DataPreprocessor()
 
     total_rmse_lgb, total_rmse_cat = 0, 0
-    for i in range(num_wafers):
-        wafer_log_df           = pl.read_parquet(f"{main_folder}/parquet_files/wafer_{i+1}_log.parquet")
+    for wafer_idx in range(num_wafers):
+        wafer_log_df           = pl.read_parquet(f"{main_folder}/parquet_files/wafer_{wafer_idx+1}_log.parquet")
         wafer_log_stats_df     = _compute_log_df_grouped_stats(wafer_log_df, 'marathon_run')
-        wafer_log_stats_df2    = wafer_log_stats_df.with_columns(pl.lit(i+1).alias("wafer"))
-        wafer_log_stats_df_with_radius = wafer_log_stats_df2.join(radius_wide_dict[i], on="marathon_run", how="left")
+        wafer_log_stats_df2    = wafer_log_stats_df.with_columns(pl.lit(wafer_idx+1).alias("wafer"))
+        wafer_log_stats_df_with_radius = wafer_log_stats_df2.join(radius_wide_dict[wafer_idx], on="marathon_run", how="left")
         log_stats_df_reordered = wafer_log_stats_df_with_radius.select(["wafer"] + [c for c in wafer_log_stats_df_with_radius.columns if c != "wafer"])
 
         X = log_stats_df_reordered.to_pandas().drop(columns=["wafer"], errors='ignore')
-        y = y_df_dict[i].sort("marathon_run").drop("marathon_run").to_pandas()
+        y = y_df_dict[wafer_idx].sort("marathon_run").drop("marathon_run").to_pandas()
 
-        X_train, y_train, X_val, y_val, _ = preprocessor.scale_and_split_data(X, y)
+        X_train: pd.DataFrame
+        y_train: np.ndarray
+        X_val: pd.DataFrame
+        y_val: np.ndarray
+        X_train, y_train, X_val, y_val, y_scaler = preprocessor.scale_and_split_data(X, y)
 
-        print(f"====== Wafer {i+1} ======")
+        nan_rows = X_train[X_train.isnull().any(axis=1)]
+        print(nan_rows.head(20))
+
+
+
+        print(f"====== Wafer {wafer_idx+1} ======")
         rmse_lgb, _ = predictor.predict_lightgbm(X_train, y_train, X_val, y_val)
         print(f"LGBM RMSE: {rmse_lgb:.3f}")
         total_rmse_lgb += rmse_lgb
 
-        rmse_cat, _ = predictor.predict_catboost(X_train, y_train, X_val, y_val)
-        print(f"Catboost RMSE: {rmse_cat:.3f}")
-        total_rmse_cat += rmse_cat
+        # rmse_cat, _ = predictor.predict_catboost(X_train, y_train, X_val, y_val)
+        # print(f"Catboost RMSE: {rmse_cat:.3f}")
+        # total_rmse_cat += rmse_cat
 
     print(f"Avg LGBM RMSE: {total_rmse_lgb / num_wafers:.3f}")
-    print(f"Avg Catboost RMSE: {total_rmse_cat / num_wafers:.3f}")
+    # print(f"Avg Catboost RMSE: {total_rmse_cat / num_wafers:.3f}")
 
 
 """ML predictions"""
 master_df, wafer_df_dict, y_df_dict, radius_wide_dict=load_and_preprocess_wafer_data(dict_of_wafer_files, main_folder, save=False)
 unique_marathon_runs_list = list(master_df["marathon_run"].unique())
 log_df = load_and_process_log_files(dict_of_log_files, log_processor, unique_marathon_runs_list, step_col_name, main_folder, save=False)
-split_and_save_log_df_by_wafer(log_df, NUM_WAFERS, main_folder, log_processor)
+split_and_save_log_df_by_wafer(log_df, NUM_WAFERS, main_folder, log_processor, overwrite = True)
 train_models(y_df_dict, radius_wide_dict, main_folder, NUM_WAFERS, device)
 
 

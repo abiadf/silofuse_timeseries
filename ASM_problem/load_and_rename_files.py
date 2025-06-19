@@ -84,8 +84,6 @@ class LogFilesProcessor:
         return df
 
 
-
-
 class WaferFilesProcessor:
     # def __init__(self, common_id_cols_mod):
         # self.COMMON_ID_COLS_MOD = common_id_cols_mod
@@ -152,5 +150,4 @@ class WaferFilesProcessor:
                 pl.col("RC").alias("wafer"))  # keep original RC values in the column
             wafer_df_dict[int(rc_val) - 1] = df_subset
         return wafer_df_dict
-
 
