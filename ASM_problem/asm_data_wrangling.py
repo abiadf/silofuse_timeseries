@@ -1,38 +1,35 @@
 import os
 import sys
+import torch
 sys.path.append(os.path.abspath('.')) # to run files that are away
 os.environ["WANDB_SILENT"] = "true"  # Suppress WandB logs
 
 libraries = ["torch", "numpy", "polars"]
 modules   = {lib: sys.modules.get(lib) for lib in libraries}
 
-if not modules["torch"]:
-    import torch
-if not modules["numpy"]:
-    import numpy as np
-if not modules["polars"]:
-    import polars as pl
-
+import numpy as np
+import polars as pl
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 # from torch.utils.data import Dataset, DataLoader, TensorDataset, random_split
-from ASM_problem.load_and_rename_files import LogFilesProcessor, WaferFilesProcessor
-from ASM_problem.prediction_methods import MultiOutputModelPredictor, DataPreprocessor
-from typing import List, Union
 
-from key_params import main_folder, NUM_WAFERS, dict_of_wafer_files, dict_of_log_files, step_col_name, COMMON_ID_COLS, COMMON_ID_COLS_MOD
+from load_and_rename_files import LogFilesProcessor, WaferFilesProcessor
+from prediction_methods import MultiOutputModelPredictor, DataPreprocessor
+
+from typing import List, Union
+from key_params import main_folder, NUM_WAFERS, dict_of_wafer_files, dict_of_log_files, step_col_name, COMMON_ID_COLS, COMMON_ID_COLS_MOD, parquet_folder_name
+
 log_processor = LogFilesProcessor(COMMON_ID_COLS_MOD, COMMON_ID_COLS)
-device  = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device        = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def load_and_preprocess_wafer_data(dict_of_wafer_files, main_folder: str, save: bool = False) -> tuple:
     """Merge water files, split by RC, and create y and radius dataframes"""
     processor = WaferFilesProcessor()
     master_df = processor.load_and_merge_wafer_files(dict_of_wafer_files)
     if save:
-        master_df.write_parquet(f"{main_folder}/parquet_files/master_wafer_file.parquet")
+        master_df.write_parquet(f"{main_folder}/{parquet_folder_name}/master_wafer_file.parquet")
     wafer_df_dict = processor.split_wafer_df_by_rc(master_df)
 
     y_dict, radius_dict, radius_wide_dict = {}, {}, {}
@@ -63,7 +60,7 @@ def load_and_process_log_files(dict_of_log_files, log_processor: LogFilesProcess
     log_df        = master_log_df.rename({c: c.strip().lower() for c in master_log_df.columns})
 
     if save:
-        log_df.write_parquet(f"{main_folder}/parquet_files/master_log_file.parquet")
+        log_df.write_parquet(f"{main_folder}/{parquet_folder_name}/master_log_file.parquet")
     return log_df
 
 def split_and_save_log_df_by_wafer(log_df, num_wafers, main_folder, log_processor: LogFilesProcessor, overwrite = False) -> None:
@@ -88,7 +85,7 @@ def split_and_save_log_df_by_wafer(log_df, num_wafers, main_folder, log_processo
         # Drop constant-valued numeric columns
         df = log_processor.remove_constant_valued_cols(df)
 
-        filepath = f"{main_folder}/parquet_files/wafer_{i+1}_log.parquet"
+        filepath = f"{main_folder}/{parquet_folder_name}/wafer_{i+1}_log.parquet"
         if overwrite or not os.path.exists(filepath):
             df.write_parquet(filepath)
 
@@ -128,7 +125,7 @@ def train_models(y_df_dict, radius_wide_dict, main_folder, num_wafers, device):
 
     total_rmse_lgb, total_rmse_cat = 0, 0
     for wafer_idx in range(num_wafers):
-        wafer_log_df           = pl.read_parquet(f"{main_folder}/parquet_files/wafer_{wafer_idx+1}_log.parquet")
+        wafer_log_df           = pl.read_parquet(f"{main_folder}/{parquet_folder_name}/wafer_{wafer_idx+1}_log.parquet")
         wafer_log_stats_df     = _compute_log_df_grouped_stats(wafer_log_df, 'marathon_run')
         wafer_log_stats_df2    = wafer_log_stats_df.with_columns(pl.lit(wafer_idx+1).alias("wafer"))
         wafer_log_stats_df_with_radius = wafer_log_stats_df2.join(radius_wide_dict[wafer_idx], on="marathon_run", how="left")
@@ -145,8 +142,6 @@ def train_models(y_df_dict, radius_wide_dict, main_folder, num_wafers, device):
 
         nan_rows = X_train[X_train.isnull().any(axis=1)]
         print(nan_rows.head(20))
-
-
 
         print(f"====== Wafer {wafer_idx+1} ======")
         rmse_lgb, _ = predictor.predict_lightgbm(X_train, y_train, X_val, y_val)
@@ -166,7 +161,7 @@ master_df, wafer_df_dict, y_df_dict, radius_wide_dict=load_and_preprocess_wafer_
 unique_marathon_runs_list = list(master_df["marathon_run"].unique())
 log_df = load_and_process_log_files(dict_of_log_files, log_processor, unique_marathon_runs_list, step_col_name, main_folder, save=False)
 split_and_save_log_df_by_wafer(log_df, NUM_WAFERS, main_folder, log_processor, overwrite = True)
-train_models(y_df_dict, radius_wide_dict, main_folder, NUM_WAFERS, device)
+# train_models(y_df_dict, radius_wide_dict, main_folder, NUM_WAFERS, device)
 
 
 # TODO: null values in log_df_with_wafer_col, what to do with them?
