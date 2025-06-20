@@ -1,6 +1,7 @@
 import os
 import sys
 import torch
+from typing import List, Union
 sys.path.append(os.path.abspath('.')) # to run files that are away
 os.environ["WANDB_SILENT"] = "true"  # Suppress WandB logs
 
@@ -17,20 +18,19 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from load_and_rename_files import LogFilesProcessor, WaferFilesProcessor
 from prediction_methods import MultiOutputModelPredictor, DataPreprocessor
-
-from typing import List, Union
+from asm_utils import count_missing_values_in_df
 from key_params import main_folder, NUM_WAFERS, dict_of_wafer_files, dict_of_log_files, step_col_name, COMMON_ID_COLS, COMMON_ID_COLS_MOD, parquet_folder_name
 
 log_processor = LogFilesProcessor(COMMON_ID_COLS_MOD, COMMON_ID_COLS)
 device        = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def load_and_preprocess_wafer_data(dict_of_wafer_files, main_folder: str, save: bool = False) -> tuple:
-    """Merge water files, split by RC, and create y and radius dataframes"""
+def load_and_preprocess_wafer_csv_data(dict_of_wafer_files, main_folder: str, save: bool = False) -> tuple:
+    """Merge wafer files, split by RC, and create y and radius dataframes"""
     processor = WaferFilesProcessor()
-    master_df = processor.load_and_merge_wafer_files(dict_of_wafer_files)
+    master_wafer_df = processor.load_and_merge_wafer_files(dict_of_wafer_files)
     if save:
-        master_df.write_parquet(f"{main_folder}/{parquet_folder_name}/master_wafer_file.parquet")
-    wafer_df_dict = processor.split_wafer_df_by_rc(master_df)
+        master_wafer_df.write_parquet(f"{main_folder}/{parquet_folder_name}/master_wafer_file.parquet")
+    wafer_df_dict = processor.split_wafer_df_by_rc(master_wafer_df)
 
     y_dict, radius_dict, radius_wide_dict = {}, {}, {}
     for i, df in wafer_df_dict.items():
@@ -39,24 +39,27 @@ def load_and_preprocess_wafer_data(dict_of_wafer_files, main_folder: str, save: 
             pl.arange(0, pl.len()).over("marathon_run").alias("radius_idx"))
         radius_wide_dict[i] = r_df.pivot(
             values="Radius (mm)", index="marathon_run", on="radius_idx", aggregate_function="first").sort("marathon_run")
-    return master_df, wafer_df_dict, y_dict, radius_wide_dict
+    return master_wafer_df, wafer_df_dict, y_dict, radius_wide_dict
 
-def load_and_process_log_files(dict_of_log_files, log_processor: LogFilesProcessor, unique_marathon_runs_list: list, step_col_name: str,main_folder: str,save: bool = False) -> pl.DataFrame:
+def load_and_process_log_csv_files(dict_of_log_files, log_processor: LogFilesProcessor, unique_marathon_runs_list: list, step_col_name: str,main_folder: str,save: bool = False) -> pl.DataFrame:
     """Read all stepfile CSVs, concat, then optionally save to parquet"""
     df_list = []
 
-    for entry in dict_of_log_files.values():
-        df = log_processor.read_csv_and_rename_cols(entry['path'])
-        df = log_processor.add_marathon_and_step_columns(df, entry['marathon'], entry['step'], step_col_name)
+    for file_entry in dict_of_log_files.values():
+        df = log_processor.read_csv_and_rename_cols(file_entry['path'])
+        df = log_processor.add_marathon_and_step_columns(df, file_entry['marathon'], file_entry['step'], step_col_name)
         df = log_processor.remove_runs_not_found_in_wafer_df(df, unique_marathon_runs_list)
         df = log_processor.insert_step_cols_after_run(df, step_col_name)
         df = log_processor.cast_int_and_float_to_float64(df)
         df = log_processor.drop_single_value_cols(df, step_col_name)
-        df = log_processor.append_step_suffix_to_cols(df, step_col_name, entry['step'])
+        df = log_processor.append_step_suffix_to_cols(df, step_col_name, file_entry['step'])
+        count_missing_values_in_df(df)
         df_list.append(df)
 
     master_log_df = pl.concat(df_list, how="diagonal")
+    # count_missing_values_in_df(master_log_df)
     master_log_df = log_processor.reorder_cols(master_log_df, step_col_name)
+    # count_missing_values_in_df(master_log_df)
     log_df        = master_log_df.rename({c: c.strip().lower() for c in master_log_df.columns})
 
     if save:
@@ -68,7 +71,6 @@ def split_and_save_log_df_by_wafer(log_df, num_wafers, main_folder, log_processo
     saving to parquet is easier to handle than a dict of dataframes"""
 
     common_cols   = [c for c in log_df.columns if not c.startswith("rc")]
-    # log_processor = LogFilesProcessor(COMMON_ID_COLS_MOD, COMMON_ID_COLS)
 
     for i in range(num_wafers):
         wafer_cols = [c for c in log_df.columns if c.startswith(f"rc{i+1}")]
@@ -126,10 +128,15 @@ def train_models(y_df_dict, radius_wide_dict, main_folder, num_wafers, device):
     total_rmse_lgb, total_rmse_cat = 0, 0
     for wafer_idx in range(num_wafers):
         wafer_log_df           = pl.read_parquet(f"{main_folder}/{parquet_folder_name}/wafer_{wafer_idx+1}_log.parquet")
+        # count_missing_values_in_df(wafer_log_df)
         wafer_log_stats_df     = _compute_log_df_grouped_stats(wafer_log_df, 'marathon_run')
+        # count_missing_values_in_df(wafer_log_stats_df)
         wafer_log_stats_df2    = wafer_log_stats_df.with_columns(pl.lit(wafer_idx+1).alias("wafer"))
+        # count_missing_values_in_df(wafer_log_stats_df2)
         wafer_log_stats_df_with_radius = wafer_log_stats_df2.join(radius_wide_dict[wafer_idx], on="marathon_run", how="left")
+        # count_missing_values_in_df(wafer_log_stats_df_with_radius)
         log_stats_df_reordered = wafer_log_stats_df_with_radius.select(["wafer"] + [c for c in wafer_log_stats_df_with_radius.columns if c != "wafer"])
+        # count_missing_values_in_df(log_stats_df_reordered)
 
         X = log_stats_df_reordered.to_pandas().drop(columns=["wafer"], errors='ignore')
         y = y_df_dict[wafer_idx].sort("marathon_run").drop("marathon_run").to_pandas()
@@ -157,9 +164,9 @@ def train_models(y_df_dict, radius_wide_dict, main_folder, num_wafers, device):
 
 
 """ML predictions"""
-master_df, wafer_df_dict, y_df_dict, radius_wide_dict=load_and_preprocess_wafer_data(dict_of_wafer_files, main_folder, save=False)
-unique_marathon_runs_list = list(master_df["marathon_run"].unique())
-log_df = load_and_process_log_files(dict_of_log_files, log_processor, unique_marathon_runs_list, step_col_name, main_folder, save=False)
+master_wafer_df, wafer_df_dict, y_df_dict, radius_wide_dict = load_and_preprocess_wafer_csv_data(dict_of_wafer_files, main_folder, save=False)
+unique_marathon_runs_list = list(master_wafer_df["marathon_run"].unique())
+log_df = load_and_process_log_csv_files(dict_of_log_files, log_processor, unique_marathon_runs_list, step_col_name, main_folder, save=False)
 split_and_save_log_df_by_wafer(log_df, NUM_WAFERS, main_folder, log_processor, overwrite = True)
 # train_models(y_df_dict, radius_wide_dict, main_folder, NUM_WAFERS, device)
 

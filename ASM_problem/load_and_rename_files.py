@@ -1,5 +1,6 @@
 
 import polars as pl
+import pandas as pd
 from typing import Tuple, Union
 
 class LogFilesProcessor:
@@ -8,9 +9,11 @@ class LogFilesProcessor:
         self.COMMON_ID_COLS     = common_id_cols
 
     def read_csv_and_rename_cols(self, file_path: str) -> pl.DataFrame:
-        """Read CSV into Polars DataFrame and title-case column names after stripping spaces"""
-        df = pl.read_csv(file_path, ignore_errors=True)
-        df = df.rename({c: c.strip().title() for c in df.columns})
+        """Read CSV into Polars DataFrame and title-case column names after stripping spaces
+        NOTE: a known polars issue that it cant use the 'decimal' parameter in read_csv, so we load into pandas first"""
+        pdf = pd.read_csv(file_path, decimal='.')
+        df  = pl.from_pandas(pdf)
+        df  = df.rename({c: c.strip().title() for c in df.columns})
         return df
 
     def add_marathon_and_step_columns(self, df: pl.DataFrame, marathon: Union[str, int], step_id: int, step_col_name: str) -> pl.DataFrame:
@@ -90,19 +93,25 @@ class WaferFilesProcessor:
 
     @staticmethod
     def load_and_merge_wafer_files(dict_of_wafer_files: dict) -> pl.DataFrame:
-        """Read CSVs + add 'marathon' and 'marathon_run' cols + move them to right after '#run' """
+        dfs = []
+        for d in dict_of_wafer_files.values():
+            pdf = pd.read_csv(
+                d['path'],
+                decimal='.',                    # adjust if needed
+                na_values=["", "NA", "null"],)  # treat as nulls
+            df = pl.from_pandas(pdf).with_columns([
+                pl.lit(d['marathon']).alias("marathon"),
+                (pl.lit(d['marathon']).cast(pl.Utf8) + "_" + pl.col("#Run").cast(pl.Utf8)).alias("marathon_run")])
+            dfs.append(df)
 
-        dfs = [pl.read_csv(d['path'], ignore_errors=True).with_columns([
-            pl.lit(d['marathon']).alias("marathon"),
-            (pl.lit(d['marathon']).cast(pl.Utf8) + "_" + pl.col("#Run").cast(pl.Utf8)).alias("marathon_run")])
-            for d in dict_of_wafer_files.values()]
         wafer_master_df = pl.concat(dfs, how="vertical")
 
-        cols = wafer_master_df.columns
+        cols = wafer_master_df.columns.copy()
         for c in ["marathon", "marathon_run"]:
             cols.remove(c)
         insert_idx = cols.index("#Run") + 1
         cols[insert_idx:insert_idx] = ["marathon", "marathon_run"]
+
         return wafer_master_df.select(cols)
 
     @staticmethod
