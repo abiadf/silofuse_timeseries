@@ -12,9 +12,6 @@ import numpy as np
 import polars as pl
 import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
-# from torch.utils.data import Dataset, DataLoader, TensorDataset, random_split
 
 from load_and_rename_files import LogFilesProcessor, WaferFilesProcessor
 from prediction_methods import MultiOutputModelPredictor, DataPreprocessor
@@ -23,6 +20,7 @@ from key_params import main_folder, NUM_WAFERS, dict_of_wafer_files, dict_of_log
 
 log_processor = LogFilesProcessor(COMMON_ID_COLS_MOD, COMMON_ID_COLS)
 device        = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
 def load_and_preprocess_wafer_csv_data(dict_of_wafer_files, main_folder: str, save: bool = False) -> tuple:
     """Merge wafer files, split by RC, and create y and radius dataframes"""
@@ -42,7 +40,7 @@ def load_and_preprocess_wafer_csv_data(dict_of_wafer_files, main_folder: str, sa
     return master_wafer_df, wafer_df_dict, y_dict, radius_wide_dict
 
 def load_and_process_log_csv_files(dict_of_log_files, log_processor: LogFilesProcessor, unique_marathon_runs_list: list, step_col_name: str,main_folder: str,save: bool = False) -> pl.DataFrame:
-    """Read all stepfile CSVs, concat, then optionally save to parquet"""
+    """Read all log step file CSVs, concat, then optionally save to parquet"""
     df_list = []
 
     for file_entry in dict_of_log_files.values():
@@ -53,7 +51,6 @@ def load_and_process_log_csv_files(dict_of_log_files, log_processor: LogFilesPro
         df = log_processor.cast_int_and_float_to_float64(df)
         df = log_processor.drop_single_value_cols(df, step_col_name)
         df = log_processor.append_step_suffix_to_cols(df, step_col_name, file_entry['step'])
-        count_missing_values_in_df(df)
         df_list.append(df)
 
     master_log_df = pl.concat(df_list, how="diagonal")
@@ -70,7 +67,7 @@ def split_and_save_log_df_by_wafer(log_df, num_wafers, main_folder, log_processo
     """Split log_df into 4 parquet files, 1 for each wafer.
     saving to parquet is easier to handle than a dict of dataframes"""
 
-    common_cols   = [c for c in log_df.columns if not c.startswith("rc")]
+    common_cols = [c for c in log_df.columns if not c.startswith("rc")]
 
     for i in range(num_wafers):
         wafer_cols = [c for c in log_df.columns if c.startswith(f"rc{i+1}")]
@@ -115,9 +112,36 @@ def _compute_log_df_grouped_stats(log_df: pl.DataFrame, col_to_group_by: Union[s
                     for col in numeric_cols]
     result_df    = log_df.group_by(col_to_group_by).agg(agg_exprs)
 
+    print(result_df.head())
+
     # we are already doing the below filtering above, lets remove it
     # filtered_log_df = result_df.filter(pl.col(col_to_group_by).is_in(y_df[col_to_group_by]))
     # return filtered_log_df
+
+    # ========================
+    # added this part (considers last row of each marathon_run)
+    # num_of_last_rows = 1
+    # sorted_df = log_df.sort("process time")
+    # result_df = sorted_df.group_by(col_to_group_by, maintain_order=True).tail(1).drop(["process time", "step_id", "#run"])
+
+    # drop_cols = ["process time", "step_id", "#run"]
+
+    # sorted_df = log_df.sort("process time")
+    # marathon_runs = sorted_df[col_to_group_by].unique().to_list()
+
+    # rows = []
+    # for run in marathon_runs:
+    #     sub_df = sorted_df.filter(pl.col(col_to_group_by) == run).tail(num_of_last_rows)
+    #     # Flatten last N rows side by side
+    #     row_data = {}
+    #     for i, row in enumerate(sub_df.rows()):
+    #         suffix = f"_last{i+1}"
+    #         for col, val in zip(sub_df.columns, row):
+    #             if col not in drop_cols and col != col_to_group_by:
+    #                 row_data[f"{col}{suffix}"] = val
+    #     row_data[col_to_group_by] = run
+    #     rows.append(row_data)
+    # result_df = pl.DataFrame(rows)
 
     return result_df
 
@@ -125,21 +149,22 @@ def train_models(y_df_dict, radius_wide_dict, main_folder, num_wafers, device):
     predictor    = MultiOutputModelPredictor(device)
     preprocessor = DataPreprocessor()
 
-    total_rmse_lgb, total_rmse_cat = 0, 0
+    total_rmse_lgb, total_rmse_cat, total_rmse_rf, total_rmse_linreg = 0, 0, 0, 0
     for wafer_idx in range(num_wafers):
         wafer_log_df           = pl.read_parquet(f"{main_folder}/{parquet_folder_name}/wafer_{wafer_idx+1}_log.parquet")
-        # count_missing_values_in_df(wafer_log_df)
         wafer_log_stats_df     = _compute_log_df_grouped_stats(wafer_log_df, 'marathon_run')
-        # count_missing_values_in_df(wafer_log_stats_df)
+        count_missing_values_in_df(wafer_log_stats_df)
         wafer_log_stats_df2    = wafer_log_stats_df.with_columns(pl.lit(wafer_idx+1).alias("wafer"))
-        # count_missing_values_in_df(wafer_log_stats_df2)
+        count_missing_values_in_df(wafer_log_stats_df2)
         wafer_log_stats_df_with_radius = wafer_log_stats_df2.join(radius_wide_dict[wafer_idx], on="marathon_run", how="left")
-        # count_missing_values_in_df(wafer_log_stats_df_with_radius)
+        count_missing_values_in_df(wafer_log_stats_df_with_radius)
         log_stats_df_reordered = wafer_log_stats_df_with_radius.select(["wafer"] + [c for c in wafer_log_stats_df_with_radius.columns if c != "wafer"])
-        # count_missing_values_in_df(log_stats_df_reordered)
+        count_missing_values_in_df(log_stats_df_reordered)
 
         X = log_stats_df_reordered.to_pandas().drop(columns=["wafer"], errors='ignore')
         y = y_df_dict[wafer_idx].sort("marathon_run").drop("marathon_run").to_pandas()
+
+        # count_missing_values_in_df(X)
 
         X_train: pd.DataFrame
         y_train: np.ndarray
@@ -147,28 +172,41 @@ def train_models(y_df_dict, radius_wide_dict, main_folder, num_wafers, device):
         y_val: np.ndarray
         X_train, y_train, X_val, y_val, y_scaler = preprocessor.scale_and_split_data(X, y)
 
-        nan_rows = X_train[X_train.isnull().any(axis=1)]
-        print(nan_rows.head(20))
-
         print(f"====== Wafer {wafer_idx+1} ======")
-        rmse_lgb, _ = predictor.predict_lightgbm(X_train, y_train, X_val, y_val)
-        print(f"LGBM RMSE: {rmse_lgb:.3f}")
-        total_rmse_lgb += rmse_lgb
+        rmse_linreg, _ = predictor.predict_linear_reg(X_train, y_train, X_val, y_val)
+        print(f"LinReg RMSE: {rmse_linreg:.3f}")
+        total_rmse_linreg += rmse_linreg
+
+        # rmse_lgb, _ = predictor.predict_lightgbm(X_train, y_train, X_val, y_val)
+        # print(f"LGBM RMSE: {rmse_lgb:.3f}")
+        # total_rmse_lgb += rmse_lgb
 
         # rmse_cat, _ = predictor.predict_catboost(X_train, y_train, X_val, y_val)
         # print(f"Catboost RMSE: {rmse_cat:.3f}")
         # total_rmse_cat += rmse_cat
 
-    print(f"Avg LGBM RMSE: {total_rmse_lgb / num_wafers:.3f}")
+        # rmse_rf, _  = predictor.predict_randomforest(X_train, y_train, X_val, y_val)
+        # print(f"RF RMSE: {rmse_rf:.3f}")
+        # total_rmse_rf += rmse_rf
+
+    print(f"Avg linreg RMSE: {total_rmse_linreg / num_wafers:.3f}")
+    # print(f"Avg LGBM RMSE: {total_rmse_lgb / num_wafers:.3f}")
+    # print(f"Avg RF RMSE: {total_rmse_rf / num_wafers:.3f}")
     # print(f"Avg Catboost RMSE: {total_rmse_cat / num_wafers:.3f}")
 
 
 """ML predictions"""
-master_wafer_df, wafer_df_dict, y_df_dict, radius_wide_dict = load_and_preprocess_wafer_csv_data(dict_of_wafer_files, main_folder, save=False)
-unique_marathon_runs_list = list(master_wafer_df["marathon_run"].unique())
-log_df = load_and_process_log_csv_files(dict_of_log_files, log_processor, unique_marathon_runs_list, step_col_name, main_folder, save=False)
-split_and_save_log_df_by_wafer(log_df, NUM_WAFERS, main_folder, log_processor, overwrite = True)
-# train_models(y_df_dict, radius_wide_dict, main_folder, NUM_WAFERS, device)
+
+if __name__ == '__main__':
+    master_wafer_df, wafer_df_dict, y_df_dict, radius_wide_dict = load_and_preprocess_wafer_csv_data(dict_of_wafer_files, main_folder, save=False)
+    unique_marathon_runs_list = list(master_wafer_df["marathon_run"].unique())
+    log_df = load_and_process_log_csv_files(dict_of_log_files, log_processor, unique_marathon_runs_list, step_col_name, main_folder, save=False)
+    log_df = log_df.fill_null(pl.lit(0))
+
+    split_and_save_log_df_by_wafer(log_df, NUM_WAFERS, main_folder, log_processor, overwrite = False)
+    train_models(y_df_dict, radius_wide_dict, main_folder, NUM_WAFERS, device)
 
 
 # TODO: null values in log_df_with_wafer_col, what to do with them?
+# NOTE: skew and kurt in _compute_log_df_grouped_stats were giving null values
+# NOTE: made result_df into lasst row of each run, but still getting same results

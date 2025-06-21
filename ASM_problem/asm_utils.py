@@ -23,15 +23,15 @@ def count_missing_values_in_df(df) -> None:
         float_cols = [col for col, dt in zip(df.columns, df.dtypes) if dt.is_float()]
 
         if float_cols:
-            nan_per_col = df.select([pl.col(col).is_nan().sum().alias(col) for col in float_cols])
+            nan_per_col   = df.select([pl.col(col).is_nan().sum().alias(col) for col in float_cols])
             cols_with_nan = sum(val > 0 for val in nan_per_col.row(0))
             rows_with_nan = df.filter(
                 pl.fold(False, lambda acc, e: acc | e, [pl.col(c).is_nan() for c in float_cols])).height
-            total_nans = nan_per_col.to_series().sum()
+            total_nans    = nan_per_col.to_series().sum()
         else:
             cols_with_nan = rows_with_nan = total_nans = 0
 
-        null_per_col = df.select([pl.col(col).is_null().sum().alias(col) for col in df.columns])
+        null_per_col    = df.select([pl.col(col).is_null().sum().alias(col) for col in df.columns])
         cols_with_nulls = sum(val > 0 for val in null_per_col.row(0))
         rows_with_nulls = df.filter(
             pl.fold(False, lambda acc, e: acc | e, [pl.col(c).is_null() for c in df.columns])).height
@@ -39,7 +39,7 @@ def count_missing_values_in_df(df) -> None:
 
     else:
         raise TypeError("Unsupported DataFrame type. Pass pandas or Polars DataFrame.")
-
+    print('---------')
     print(f"# columns with NaNs: {cols_with_nan}")
     print(f"# rows with NaNs: {rows_with_nan}")
     print(f"Total NaNs: {total_nans}")

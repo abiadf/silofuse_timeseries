@@ -5,25 +5,33 @@ import polars as pl
 import pandas as pd
 import catboost as cb
 import xgboost as xgb
-from sklearn.multioutput import MultiOutputRegressor
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
-from lightgbm import LGBMRegressor, early_stopping
-from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
-from sklearn.linear_model import ElasticNet
-from sklearn.impute import SimpleImputer
-from sklearn.pipeline import make_pipeline
-
-from sklearn.model_selection import GridSearchCV, KFold, train_test_split
-from sklearn.metrics import mean_squared_error, root_mean_squared_error
 import itertools
 from itertools import product
+from lightgbm import LGBMRegressor, early_stopping
+
+from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LinearRegression, ElasticNet
+from sklearn.metrics import mean_squared_error, root_mean_squared_error
+from sklearn.model_selection import GridSearchCV, KFold, train_test_split
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.pipeline import make_pipeline
 
 
 class MultiOutputModelPredictor:
     def __init__(self, device):
         self.device = device
         self.device_str = 'GPU' if self.device.type == 'cuda' else 'CPU'
+
+
+    def predict_linear_reg(self, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray) -> Tuple[float, np.ndarray]:
+        model         = MultiOutputRegressor(LinearRegression()).fit(X_train, y_train)
+        y_pred_linreg = model.predict(X_val)
+        rmse_linreg   = mean_squared_error(y_val, y_pred_linreg) ** 0.5
+        return rmse_linreg, y_pred_linreg
+
 
     def predict_lightgbm(self, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray) -> Tuple[float, np.ndarray]:
         n_targets = y_train.shape[1]
@@ -33,10 +41,10 @@ class MultiOutputModelPredictor:
             model = LGBMRegressor(objective       = 'regression',
                                   verbosity       = -1,
                                   n_estimators    = 1000,
-                                  learning_rate   = 0.05,
+                                  learning_rate   = 0.1,
                                   num_leaves      = 31,
-                                  max_depth       = -1,
-                                  min_data_in_leaf= 20,
+                                  max_depth       = 3,
+                                  min_data_in_leaf= 1,
                                   device          = self.device_str)
             model.fit(X_train, y_train[:, i],
                     eval_set=[(X_val, y_val[:, i])],

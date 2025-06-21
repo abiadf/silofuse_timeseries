@@ -132,7 +132,18 @@ class WaferFilesProcessor:
                               columns= "Site #",
                               aggregate_function="mean")
         y_df      = y_df.sort("marathon_run")
+
         radius_df = wafer_df.select(["marathon_run", "Radius (mm)"])
+
+        # =================
+        # added this part
+        # print(radius_df.shape)
+        # radius_df = radius_df.join(
+        #     radius_df.group_by(["marathon_run", "Radius (mm)"]).count().filter(pl.col("count") == 1),
+        #     on=["marathon_run", "Radius (mm)"], how="inner")
+
+        # print(radius_df.shape)
+        # =================
 
         counts = wafer_df.group_by(["marathon_run", "Site #"]).agg(pl.count()).rename({"count": "cnt"})
         dupes  = counts.filter(pl.col("cnt") > 1).select(["marathon_run", "Site #"])
