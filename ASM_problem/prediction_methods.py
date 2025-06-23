@@ -12,13 +12,12 @@ from lightgbm import LGBMRegressor, early_stopping
 
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LinearRegression, ElasticNet
+from sklearn.linear_model import LinearRegression, ElasticNet, Ridge
 from sklearn.metrics import mean_squared_error, root_mean_squared_error
 from sklearn.model_selection import GridSearchCV, KFold, train_test_split
 from sklearn.multioutput import MultiOutputRegressor
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 from sklearn.pipeline import make_pipeline
-
 
 class MultiOutputModelPredictor:
     def __init__(self, device):
@@ -31,6 +30,12 @@ class MultiOutputModelPredictor:
         y_pred_linreg = model.predict(X_val)
         rmse_linreg   = mean_squared_error(y_val, y_pred_linreg) ** 0.5
         return rmse_linreg, y_pred_linreg
+
+    def predict_linear_reg_ridge(self, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray) -> Tuple[float, np.ndarray]:
+        model         = MultiOutputRegressor(Ridge(alpha=1.0)).fit(X_train, y_train)
+        y_pred_ridge  = model.predict(X_val)
+        rmse_ridge    = mean_squared_error(y_val, y_pred_ridge) ** 0.5
+        return rmse_ridge, y_pred_ridge
 
 
     def predict_lightgbm(self, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray) -> Tuple[float, np.ndarray]:
@@ -220,12 +225,10 @@ class MultiOutputModelPredictor:
         return rmse_elas, y_pred_elas
 
 
-
-
 class DataPreprocessor:
     def __init__(self):
-        self.y_scaler = StandardScaler()
-        self.x_scaler = StandardScaler()
+        self.y_scaler = RobustScaler() # StandardScaler()
+        self.x_scaler = RobustScaler() # StandardScaler()
 
     def join_logs_and_wafer_df(self, log_df: pl.DataFrame, wafer_df: pl.DataFrame, y_df: pl.DataFrame) -> Tuple[pl.DataFrame, pl.DataFrame]:
         X_full = log_df.join(wafer_df, on="marathon_run", how="inner", suffix="_df2")
@@ -233,16 +236,34 @@ class DataPreprocessor:
         y_full_pd = y_df.sort("marathon_run").drop("marathon_run").to_pandas()
         return X_full_pd, y_full_pd
 
-    def scale_and_split_data(self, X_full_pd: pl.DataFrame, y_full_pd: pl.DataFrame) -> Tuple[pl.DataFrame, np.ndarray, pd.DataFrame, np.ndarray, StandardScaler]:
+    # def _drop_non_numeric_cols_from_df(self, df):
+    #     if type(df) == pl.DataFrame:
+    #         return df.select(pl.all().filter(lambda s: s.dtype.is_numeric()))
+    #     elif type(df) == pd.DataFrame:
+    #         return df.select_dtypes(include=[np.number])
+
+    def drop_certain_cols_from_df(self, df, cols_to_drop):
+        """Drop a set of cols from df. Use this function when unsure of the df type"""
+        if isinstance(df, pl.DataFrame):
+            return df.drop([col for col in cols_to_drop if col in df.columns])
+        elif isinstance(df, pd.DataFrame):
+            existing_cols = [col for col in cols_to_drop if col in df.columns]
+            return df.drop(columns=existing_cols)
+        else:
+            raise TypeError("Unsupported DataFrame type")
+
+    def scale_and_split_data(self, X_full_pd: pd.DataFrame, y_full_pd: pd.DataFrame) -> Tuple[pd.DataFrame, np.ndarray, pd.DataFrame, np.ndarray, StandardScaler]:
+        test_size    = 0.2
+
         y_full_scaled = self.y_scaler.fit_transform(y_full_pd)
-        X_train, X_val, y_train, y_val = train_test_split(X_full_pd, y_full_scaled, test_size=0.2, random_state=42)
+        X_train, X_val, y_train, y_val = train_test_split(X_full_pd, y_full_scaled, test_size=test_size, random_state=42)
 
-        cols_to_scale = [c for c in X_train.select_dtypes(include=np.number).columns if c != "marathon_run"]
-        X_train[cols_to_scale] = self.x_scaler.fit_transform(X_train[cols_to_scale])
-        X_val[cols_to_scale] = self.x_scaler.transform(X_val[cols_to_scale])
+        cols_to_scale         = [c for c in X_train.select_dtypes(include=np.number).columns]
+        X_train[cols_to_scale]= self.x_scaler.fit_transform(X_train[cols_to_scale])
+        X_val[cols_to_scale]  = self.x_scaler.transform(X_val[cols_to_scale])
 
-        X_train_final = X_train.drop(columns=["marathon_run"])
-        X_val_final = X_val.drop(columns=["marathon_run"])
+        print("X_train max:", X_train[cols_to_scale].max().max())
+        print("X_val max:", X_val[cols_to_scale].max().max())
 
-        return X_train_final, y_train, X_val_final, y_val, self.y_scaler
+        return X_train, y_train, X_val, y_val, self.y_scaler
 

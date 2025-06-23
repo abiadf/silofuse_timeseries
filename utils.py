@@ -105,8 +105,12 @@ class DimensionalityEstimator:
         """Estimate intrinsic dimensionality using scikit-dimension (ie best latent size)
         input: dataset (pd or pl df, or np array)
         output: estimated dataset dimensionality"""
-        if isinstance(dataset, (pd.DataFrame, pl.DataFrame)):
-            X = dataset.to_numpy() if isinstance(dataset, pd.DataFrame) else dataset.to_numpy()
+        if isinstance(dataset, pd.DataFrame):
+            dataset = dataset.select_dtypes(include=[np.number])
+            X = dataset.to_numpy()
+        elif isinstance(dataset, pl.DataFrame):
+            dataset = dataset.select(pl.col(pl.NUMERIC_DTYPES))
+            X = dataset.to_numpy()
         elif isinstance(dataset, (np.ndarray,)):
             X = dataset
         else:
