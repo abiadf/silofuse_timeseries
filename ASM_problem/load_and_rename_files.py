@@ -111,10 +111,10 @@ class WaferFilesProcessor:
         return cols[:idx] + new_cols + cols[idx:]
 
     @staticmethod
-    def load_wafer_csv_files_and_merge_to_df(dict_of_wafer_files: dict) -> pl.DataFrame:
+    def load_wafer_csv_files_and_merge_to_df(dict_of_spatial_files: dict) -> pl.DataFrame:
         """Loads WAFER csv files from different steps/marathons, adds marathon col, then merges into 1 big df"""
         dfs = []
-        for val in dict_of_wafer_files.values():
+        for val in dict_of_spatial_files.values():
             pdf = pd.read_csv(val['path'],
                               decimal  ='.',
                               na_values=["", "NA", "null"],)
@@ -164,22 +164,22 @@ class WaferFilesProcessor:
         return y_df, radius_df
 
     @staticmethod
-    def split_master_wafer_df_by_rc(wafer_df: pl.DataFrame, col_to_group_by: str, new_col_name: str) -> dict:
+    def split_master_spatial_df_by_rc(wafer_df: pl.DataFrame, col_to_group_by: str, new_col_name: str) -> dict:
         """Splits wafer_df by the 'RC' col values and returns a dict of dfs, each has as key (0-3) and wafer/RC value (1-4)
         dict of shape:   {int(rc_val) - 1 : df_subset} x 4"""
 
-        # wafer_df_dict = {i: df.with_columns(pl.lit(i).alias("wafer"))
+        # spatial_df_dict = {i: df.with_columns(pl.lit(i).alias("wafer"))
         #                  for i, (_, df) in enumerate(wafer_df.partition_by("RC", as_dict=True).items())}
-        # wafer_df_dict = {rc_val: df.with_columns(pl.col("RC").alias("wafer"))
+        # spatial_df_dict = {rc_val: df.with_columns(pl.col("RC").alias("wafer"))
         #                 for rc_val, df in wafer_df.partition_by("RC", as_dict=True).items()}
-        # wafer_df_dict = {rc_val: df.rename({"RC": "wafer"})
+        # spatial_df_dict = {rc_val: df.rename({"RC": "wafer"})
         #                  for rc_val, df in wafer_df.partition_by("RC", as_dict=True).items()}
         # the 'rename' method^ was causing memory issues
 
-        wafer_df_dict = {}
+        spatial_df_dict = {}
         for rc_val in wafer_df[col_to_group_by].unique():
             df_subset = wafer_df.filter(pl.col(col_to_group_by) == rc_val).with_columns(
                 pl.col(col_to_group_by).alias(new_col_name)) # keep original RC values in col
-            wafer_df_dict[int(rc_val) - 1] = df_subset
-        return wafer_df_dict
+            spatial_df_dict[int(rc_val) - 1] = df_subset
+        return spatial_df_dict
 
