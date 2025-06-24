@@ -200,7 +200,13 @@ class MultiOutputModelPredictor:
 
     @staticmethod
     def predict_randomforest(X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray) -> Tuple[float, np.ndarray]:
-        rf_model  = MultiOutputRegressor(RandomForestRegressor(random_state=42))
+        rf = RandomForestRegressor(n_estimators = 100,
+                                   max_depth    = 15,
+                                   max_features = 'sqrt',
+                                   min_samples_leaf=10,
+                                   n_jobs       = -1,
+                                   random_state = 42)
+        rf_model  = MultiOutputRegressor(rf)
         rf_model.fit(X_train, y_train)
         y_pred_rf = rf_model.predict(X_val)
         rmse_rf   = mean_squared_error(y_val, y_pred_rf) ** 0.5
