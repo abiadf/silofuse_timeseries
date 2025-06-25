@@ -42,6 +42,7 @@ class MultiOutputModelPredictor:
         n_targets = y_train.shape[1]
         y_pred    = np.zeros(y_val.shape)
         
+        if self.device_str == 'gpu'
         for i in range(n_targets):
             model = LGBMRegressor(objective       = 'regression',
                                   verbosity       = -1,
