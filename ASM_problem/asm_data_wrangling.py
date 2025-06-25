@@ -208,7 +208,7 @@ def _compute_log_df_grouped_stats(log_df: pl.DataFrame, col_to_group_by: Union[s
     result_df    = log_df.group_by(col_to_group_by).agg(agg_exprs)
     return result_df
 
-def _flatten_last_rows(log_df: pl.DataFrame, col_to_group_by: Union[str, List[str]], num_of_last_rows:int = 1) -> pl.DataFrame:
+def _flatten_last_n_rows(log_df: pl.DataFrame, col_to_group_by: Union[str, List[str]], num_of_last_rows:int = 1) -> pl.DataFrame:
     """considers last N rows of each marathon_run"""
     sort_by_col      = "process time"
     group_by_col     = "marathon_run"
@@ -241,6 +241,36 @@ def _flatten_last_rows(log_df: pl.DataFrame, col_to_group_by: Union[str, List[st
 
         return pl.DataFrame(data)
 
+def flatten_last_n_rows_per_wafer(log_df: pl.DataFrame,group_cols: list[str],time_col: str = "process time",num_last_rows: int = 3,) -> pl.DataFrame:
+    # Sort by time
+    df_sorted = log_df.sort(time_col)
+
+    # Get numeric columns only
+    numeric_cols = [
+        col for col, dtype in df_sorted.schema.items()
+        if dtype in (pl.Float64, pl.Float32, pl.Int64, pl.Int32)]
+
+    results    = []
+    group_keys = []
+    col_names  = [f"{col}_last{i+1}" for i in range(num_last_rows) for col in numeric_cols]
+
+    for group_vals, group_df in df_sorted.group_by(group_cols, maintain_order=True):
+        tail_df = group_df.select(numeric_cols).tail(num_last_rows)
+        flat    = tail_df.to_numpy().flatten()
+        if len(flat) < len(col_names):  # Pad if not enough rows
+            flat = np.pad(flat, (0, len(col_names) - len(flat)), constant_values=np.nan)
+        results.append(flat)
+        group_keys.append([*group_vals])
+
+    # Build final DataFrame
+    key_cols = list(zip(*group_keys))
+    data     = {col: vals for col, vals in zip(group_cols, key_cols)}
+    for i, name in enumerate(col_names):
+        data[name] = [row[i] for row in results]
+
+    return pl.DataFrame(data)
+
+
 
 def train_models(y_df_dict, radius_wide_dict, main_folder, num_wafers, device):
     predictor    = MultiOutputModelPredictor(device)
@@ -253,7 +283,7 @@ def train_models(y_df_dict, radius_wide_dict, main_folder, num_wafers, device):
     for wafer_idx in range(num_wafers):
         wafer_log_df             = pl.read_parquet(f"{main_folder}/{parquet_folder_name}/{wafer_col}_{wafer_idx+1}_log.parquet")
         # processed_wafer_log_df   = _compute_log_df_grouped_stats(wafer_log_df, 'marathon_run')
-        processed_wafer_log_df   = _flatten_last_rows(wafer_log_df, marathon_run_col, num_of_last_rows=1)
+        processed_wafer_log_df   = _flatten_last_n_rows(wafer_log_df, marathon_run_col, num_of_last_rows=1)
         wafer_log_df2            = processed_wafer_log_df.with_columns(pl.lit(wafer_idx+1).alias(wafer_col))
         wafer_log_df2_with_radius= wafer_log_df2.join(radius_wide_dict[wafer_idx], on=marathon_run_col, how="left")
         log_df_reordered         = wafer_log_df2_with_radius.select([wafer_col] + [c for c in wafer_log_df2_with_radius.columns if c != wafer_col])

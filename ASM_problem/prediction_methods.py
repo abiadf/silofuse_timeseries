@@ -8,6 +8,7 @@ import xgboost as xgb
 
 import itertools
 from itertools import product
+import lightgbm as lgb
 from lightgbm import LGBMRegressor, early_stopping
 
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
@@ -23,7 +24,6 @@ class MultiOutputModelPredictor:
     def __init__(self, device):
         self.device = device
         self.device_str = 'GPU' if self.device.type == 'cuda' else 'CPU'
-
 
     def predict_linear_reg(self, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray) -> Tuple[float, np.ndarray]:
         model         = MultiOutputRegressor(LinearRegression()).fit(X_train, y_train)
@@ -45,12 +45,15 @@ class MultiOutputModelPredictor:
         for i in range(n_targets):
             model = LGBMRegressor(objective       = 'regression',
                                   verbosity       = -1,
-                                  n_estimators    = 1000,
-                                  learning_rate   = 0.1,
-                                  num_leaves      = 31,
-                                  max_depth       = 3,
-                                  min_data_in_leaf= 1,
-                                  device          = self.device_str)
+                                  n_estimators    = 1000, # bigger = better = slower
+                                  learning_rate   = 0.15,
+                                  max_depth       = 6,  # bigger = better = slower
+                                  num_leaves      = 64, # ≈ 2^max_depth
+                                  min_data_in_leaf= 10, # lower = more accurate = slower
+                                  device          = self.device_str,
+                                  feature_fraction=0.8,
+                                  bagging_fraction=0.8,
+                                  bagging_freq    = 1,)
             model.fit(X_train, y_train[:, i],
                     eval_set=[(X_val, y_val[:, i])],
                     callbacks=[early_stopping(stopping_rounds=50, verbose=False)])
@@ -59,7 +62,7 @@ class MultiOutputModelPredictor:
         rmse = mean_squared_error(y_val, y_pred) ** 0.5
         return rmse, y_pred
 
-
+    # [to remove] seems i duplicated this one below
     def tune_lightgbm_hyperparams_manual(self, X_train, y_train):
         n_targets = y_train.shape[1]
         param_grid = {
@@ -112,23 +115,28 @@ class MultiOutputModelPredictor:
 
     def predict_catboost(self, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray) -> Tuple[float, np.ndarray]:
         """CatBoost only accepts uppercase 'task_type', beware of that"""
-        model = MultiOutputRegressor(cb.CatBoostRegressor(verbose    = 0,
-                                                          iterations = 100,
-                                                          task_type  = 'CPU'))#self.device_str))
+        model = MultiOutputRegressor(cb.CatBoostRegressor(iterations         = 50,
+                                                          learning_rate      = 0.4,
+                                                          depth              = 8,
+                                                          l2_leaf_reg        = 3,
+                                                          border_count       = 128,
+                                                          bagging_temperature= 0,
+                                                          task_type          = 'CPU',
+                                                          verbose            = 0,
+                                                          random_seed        = 42))
         model.fit(X_train, y_train)
         y_pred_cat = model.predict(X_val)
-        rmse_cat = mean_squared_error(y_val, y_pred_cat) ** 0.5
+        rmse_cat   = mean_squared_error(y_val, y_pred_cat) ** 0.5
         return rmse_cat, y_pred_cat
 
     def tune_catboost_hyperparams(self, X_train: np.ndarray, y_train: np.ndarray):
-
         param_grid = {
-            'iterations': [50],
-            'learning_rate': [0.01, 0.05, 0.1],
-            'depth': [4, 6],
-            'l2_leaf_reg': [3, 7],
-            'border_count': [32, 64],
-            'bagging_temperature': [0, 1]}
+            'iterations':    [50],
+            'learning_rate': [0.38, 0.39, 0.41, 0.42, 0.43],
+            'depth':         [8], # higher is better, but takes longer
+            'l2_leaf_reg':   [3],
+            'border_count':  [64], # higher is better, but takes longer
+            'bagging_temperature': [1]}
 
         best_score  = float('inf')
         best_params = None
@@ -189,6 +197,74 @@ class MultiOutputModelPredictor:
         print(f"Best CV RMSE: {best_score:.4f}")
         return best_model
 
+    def tune_lightgbm_hyperparams(self, X_train: np.ndarray, y_train: np.ndarray):
+        param_grid = {
+            'n_estimators':     [50],
+            'learning_rate':    [0.15, 0.2, 0.25, 0.35],#, 0.4],
+            'max_depth':        [6],
+            'reg_lambda':       [3],
+            'num_leaves':       [64],# usually ~2^depth
+            'bagging_fraction': [1.0],}   # 1 = no bagging
+
+        best_score  = float('inf')
+        best_params = None
+        best_model  = None
+
+        combos = list(itertools.product(
+            param_grid['n_estimators'],
+            param_grid['learning_rate'],
+            param_grid['max_depth'],
+            param_grid['reg_lambda'],
+            param_grid['num_leaves'],
+            param_grid['bagging_fraction'],))
+
+        kf = KFold(n_splits=3, shuffle=True, random_state=42)
+        total = len(combos)
+
+        for idx, (n_estimators, learning_rate, max_depth, reg_lambda, num_leaves, bagging_fraction) in enumerate(combos, 1):
+            print(f"Combo {idx}/{total}: est={n_estimators}, lr={learning_rate}, depth={max_depth}, lambda={reg_lambda}, leaves={num_leaves}, bag_frac={bagging_fraction}")
+            
+            cv_scores = []
+            for train_idx, val_idx in kf.split(X_train):
+                X_tr, X_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
+                y_tr, y_val = y_train[train_idx], y_train[val_idx]
+
+                base_model = lgb.LGBMRegressor(
+                    n_estimators=n_estimators,
+                    learning_rate=learning_rate,
+                    max_depth=max_depth,
+                    reg_lambda=reg_lambda,
+                    num_leaves=num_leaves,
+                    bagging_fraction=bagging_fraction,
+                    subsample_freq=1,
+                    verbose=-1,
+                    n_jobs=1,
+                    random_state=42)
+
+                multi_model = MultiOutputRegressor(base_model)
+                multi_model.fit(X_tr, y_tr)
+                preds = multi_model.predict(X_val)
+                rmse = root_mean_squared_error(y_val, preds)
+                cv_scores.append(rmse)
+
+            avg_rmse = np.mean(cv_scores)
+            print(f"Avg RMSE: {avg_rmse:.4f}")
+
+            if avg_rmse < best_score:
+                best_score = avg_rmse
+                best_params = {
+                    'n_estimators': n_estimators,
+                    'learning_rate': learning_rate,
+                    'max_depth': max_depth,
+                    'reg_lambda': reg_lambda,
+                    'num_leaves': num_leaves,
+                    'bagging_fraction': bagging_fraction}
+                best_model = multi_model
+
+        print("Best params:", best_params)
+        print(f"Best CV RMSE: {best_score:.4f}")
+        return best_model
+
 
     @staticmethod
     def predict_xgboost(X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray) -> Tuple[float, np.ndarray]:
@@ -233,8 +309,8 @@ class MultiOutputModelPredictor:
 
 class DataPreprocessor:
     def __init__(self):
-        self.y_scaler = RobustScaler() # StandardScaler()
-        self.x_scaler = RobustScaler() # StandardScaler()
+        self.y_scaler = StandardScaler() #RobustScaler()
+        self.x_scaler = StandardScaler() #RobustScaler()
 
     def join_logs_and_wafer_df(self, log_df: pl.DataFrame, wafer_df: pl.DataFrame, y_df: pl.DataFrame) -> Tuple[pl.DataFrame, pl.DataFrame]:
         X_full = log_df.join(wafer_df, on="marathon_run", how="inner", suffix="_df2")
@@ -259,17 +335,15 @@ class DataPreprocessor:
             raise TypeError("Unsupported DataFrame type")
 
     def scale_and_split_data(self, X_full_pd: pd.DataFrame, y_full_pd: pd.DataFrame) -> Tuple[pd.DataFrame, np.ndarray, pd.DataFrame, np.ndarray, StandardScaler]:
-        test_size    = 0.2
+        test_size = 0.2
 
-        y_full_scaled = self.y_scaler.fit_transform(y_full_pd)
-        X_train, X_val, y_train, y_val = train_test_split(X_full_pd, y_full_scaled, test_size=test_size, random_state=42)
+        y_full_scaled_np                     = self.y_scaler.fit_transform(y_full_pd)
+        X_train, X_val, y_train_np, y_val_np = train_test_split(X_full_pd, y_full_scaled_np, test_size=test_size, random_state=42)
 
-        cols_to_scale         = [c for c in X_train.select_dtypes(include=np.number).columns]
-        X_train[cols_to_scale]= self.x_scaler.fit_transform(X_train[cols_to_scale])
-        X_val[cols_to_scale]  = self.x_scaler.transform(X_val[cols_to_scale])
+        cols_to_scale = [c for c in X_train.select_dtypes(include=np.number).columns]
+        # print("Cols to scale:", cols_to_scale)
 
-        print("X_train max:", X_train[cols_to_scale].max().max())
-        print("X_val max:", X_val[cols_to_scale].max().max())
+        X_train.loc[:, cols_to_scale] = self.x_scaler.fit_transform(X_train[cols_to_scale])
+        X_val.loc[:, cols_to_scale]   = self.x_scaler.transform(X_val[cols_to_scale])
 
-        return X_train, y_train, X_val, y_val, self.y_scaler
-
+        return X_train, y_train_np, X_val, y_val_np, self.y_scaler
