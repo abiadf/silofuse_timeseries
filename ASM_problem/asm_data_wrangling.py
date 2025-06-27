@@ -56,9 +56,7 @@ def load_process_and_combine_log_csv_files(dict_of_log_files, log_processor: Log
         df_list.append(df)
 
     master_log_df = pl.concat(df_list, how="diagonal")
-    # count_missing_values_in_df(master_log_df)
     master_log_df = log_processor.reorder_cols(master_log_df, step_col_name)
-    # count_missing_values_in_df(master_log_df)
     master_log_df = master_log_df.rename({col: col.strip().lower() for col in master_log_df.columns})
 
     if save:
@@ -163,7 +161,7 @@ def infer_wafer_from_rc_values(log_df: pl.DataFrame, rc_prefix="rc", wafer_col="
     return log_df_no_bool_cols
 
 def fast_infer_wafer(df: pl.DataFrame, num_wafers: int) -> pl.DataFrame:
-    wafer_sums = []
+    wafer_sums    = []
     wafer_indices = []
 
     for i in range(1, num_wafers + 1):
@@ -175,7 +173,6 @@ def fast_infer_wafer(df: pl.DataFrame, num_wafers: int) -> pl.DataFrame:
         wafer_indices.append(i)
 
     df = df.with_columns(wafer_sums)
-
     df = df.with_columns(
         pl.struct([f"wafer_{i}" for i in wafer_indices]).arg_max().alias("wafer") + 1)
 

@@ -42,18 +42,17 @@ class MultiOutputModelPredictor:
         n_targets = y_train.shape[1]
         y_pred    = np.zeros(y_val.shape)
         
-        if self.device_str == 'gpu'
         for i in range(n_targets):
             model = LGBMRegressor(objective       = 'regression',
                                   verbosity       = -1,
-                                  n_estimators    = 1000, # bigger = better = slower
+                                  n_estimators    = 500, # bigger = better = slower
                                   learning_rate   = 0.15,
-                                  max_depth       = 6,  # bigger = better = slower
-                                  num_leaves      = 64, # ≈ 2^max_depth
-                                  min_data_in_leaf= 10, # lower = more accurate = slower
+                                  max_depth       = 5,  # bigger = better = slower
+                                  num_leaves      = 32, # ≈ 2^max_depth
+                                  min_data_in_leaf= 15, # lower = more accurate = slower
                                   device          = self.device_str,
-                                  feature_fraction=0.8,
-                                  bagging_fraction=0.8,
+                                  feature_fraction=0.7,
+                                  bagging_fraction=0.7,
                                   bagging_freq    = 1,)
             model.fit(X_train, y_train[:, i],
                     eval_set=[(X_val, y_val[:, i])],
@@ -62,6 +61,7 @@ class MultiOutputModelPredictor:
         
         rmse = mean_squared_error(y_val, y_pred) ** 0.5
         return rmse, y_pred
+
 
     # [to remove] seems i duplicated this one below
     def tune_lightgbm_hyperparams_manual(self, X_train, y_train):
@@ -126,6 +126,7 @@ class MultiOutputModelPredictor:
                                                           verbose            = 0,
                                                           random_seed        = 42))
         model.fit(X_train, y_train)
+        importances= np.array([est.get_feature_importance() for est in model.estimators_])
         y_pred_cat = model.predict(X_val)
         rmse_cat   = mean_squared_error(y_val, y_pred_cat) ** 0.5
         return rmse_cat, y_pred_cat
