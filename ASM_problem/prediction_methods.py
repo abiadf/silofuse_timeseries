@@ -338,7 +338,6 @@ class DataPreprocessor:
 
     def scale_and_split_data(self, X_full_pd: pd.DataFrame, y_full_pd: pd.DataFrame) -> Tuple[pd.DataFrame, np.ndarray, pd.DataFrame, np.ndarray, StandardScaler]:
         test_size = 0.2
-
         y_full_scaled_np                     = self.y_scaler.fit_transform(y_full_pd)
         X_train, X_val, y_train_np, y_val_np = train_test_split(X_full_pd, y_full_scaled_np, test_size=test_size, random_state=42)
 
@@ -349,3 +348,73 @@ class DataPreprocessor:
         X_val.loc[:, cols_to_scale]   = self.x_scaler.transform(X_val[cols_to_scale])
 
         return X_train, y_train_np, X_val, y_val_np, self.y_scaler
+
+
+    def scale_per_wafer_and_split_data(self, X_full_pd: pd.DataFrame, y_full_pd: pd.DataFrame, wafer_col="wafer", test_size=0.2):
+        # Split first (to avoid info leak)
+        X_train, X_val, y_train, y_val = train_test_split(X_full_pd, y_full_pd, test_size=test_size, random_state=42)
+
+        # Numeric columns except wafer_col for X
+        cols_to_scale_X = [c for c in X_train.select_dtypes(include="number").columns if c != wafer_col]
+        # Numeric columns for y
+        cols_to_scale_y = [c for c in y_train.select_dtypes(include="number").columns if c != wafer_col]
+
+        wafer_x_scalers = {}
+        wafer_y_scalers = {}
+
+        def scale_df_group(df, cols, scaler=None):
+            if scaler is None:
+                scaler = StandardScaler()
+                scaled_vals = scaler.fit_transform(df[cols])
+            else:
+                scaled_vals = scaler.transform(df[cols])
+            df.loc[:, cols] = scaled_vals
+            return df, scaler
+
+        # Scale X_train and y_train per wafer
+        X_train_scaled_list = []
+        y_train_scaled_list = []
+
+        for wafer_id, X_grp in X_train.groupby(wafer_col):
+            y_grp = y_train.loc[X_grp.index]
+
+            X_grp_scaled, x_scaler = scale_df_group(X_grp.copy(), cols_to_scale_X)
+            y_grp_scaled, y_scaler = scale_df_group(y_grp.copy(), cols_to_scale_y)
+
+            wafer_x_scalers[wafer_id] = x_scaler
+            wafer_y_scalers[wafer_id] = y_scaler
+
+            X_train_scaled_list.append(X_grp_scaled)
+            y_train_scaled_list.append(y_grp_scaled)
+
+        X_train_scaled = pd.concat(X_train_scaled_list).sort_index()
+        y_train_scaled = pd.concat(y_train_scaled_list).sort_index()
+
+        # Scale X_val and y_val per wafer using stored scalers
+        X_val_scaled_list = []
+        y_val_scaled_list = []
+
+        for wafer_id, X_grp in X_val.groupby(wafer_col):
+            y_grp = y_val.loc[X_grp.index]
+
+            x_scaler = wafer_x_scalers.get(wafer_id)
+            y_scaler = wafer_y_scalers.get(wafer_id)
+
+            if x_scaler is not None:
+                X_grp_scaled, _ = scale_df_group(X_grp.copy(), cols_to_scale_X, scaler=x_scaler)
+            else:
+                X_grp_scaled = X_grp.copy()
+
+            if y_scaler is not None:
+                y_grp_scaled, _ = scale_df_group(y_grp.copy(), cols_to_scale_y, scaler=y_scaler)
+            else:
+                y_grp_scaled = y_grp.copy()
+
+            X_val_scaled_list.append(X_grp_scaled)
+            y_val_scaled_list.append(y_grp_scaled)
+
+        X_val_scaled = pd.concat(X_val_scaled_list).sort_index()
+        y_val_scaled = pd.concat(y_val_scaled_list).sort_index()
+
+        # Return X,y as DataFrames, but y can be converted to np.ndarray if needed
+        return X_train_scaled, y_train_scaled, X_val_scaled, y_val_scaled, wafer_x_scalers, wafer_y_scalers
