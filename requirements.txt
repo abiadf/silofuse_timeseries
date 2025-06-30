@@ -20,6 +20,7 @@ wandb
 PyYAML
 pykeops
 polars
+shap
 umap-learn # not umap
 xgboost
 

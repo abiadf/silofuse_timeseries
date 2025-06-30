@@ -114,22 +114,27 @@ class MultiOutputModelPredictor:
         return best_params
 
 
-    def predict_catboost(self, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray) -> Tuple[float, np.ndarray]:
+    def predict_catboost(self, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray):
         """CatBoost only accepts uppercase 'task_type', beware of that"""
-        model = MultiOutputRegressor(cb.CatBoostRegressor(iterations         = 50,
-                                                          learning_rate      = 0.4,
-                                                          depth              = 8,
-                                                          l2_leaf_reg        = 3,
-                                                          border_count       = 128,
-                                                          bagging_temperature= 0,
-                                                          task_type          = 'CPU',
-                                                          verbose            = 0,
-                                                          random_seed        = 42))
-        model.fit(X_train, y_train)
-        importances= np.array([est.get_feature_importance() for est in model.estimators_])
-        y_pred_cat = model.predict(X_val)
-        rmse_cat   = mean_squared_error(y_val, y_pred_cat) ** 0.5
-        return rmse_cat, y_pred_cat
+        single_model = cb.CatBoostRegressor(iterations         = 50,
+                                            learning_rate      = 0.4,
+                                            depth              = 8,
+                                            l2_leaf_reg        = 3,
+                                            border_count       = 128,
+                                            bagging_temperature= 0,
+                                            task_type          = 'CPU',
+                                            verbose            = 0,
+                                            random_seed        = 42)
+        multi_model  = MultiOutputRegressor(single_model)
+        multi_model.fit(X_train, y_train)
+
+        importances  = np.array([est.get_feature_importance() for est in multi_model.estimators_])
+        y_pred_cat   = multi_model.predict(X_val)
+        rmse_cat     = mean_squared_error(y_val, y_pred_cat) ** 0.5
+        return rmse_cat, y_pred_cat, importances
+
+
+
 
     def tune_catboost_hyperparams(self, X_train: np.ndarray, y_train: np.ndarray):
         param_grid = {
@@ -351,6 +356,14 @@ class DataPreprocessor:
 
 
     def scale_per_wafer_and_split_data(self, X_full_pd: pd.DataFrame, y_full_pd: pd.DataFrame, wafer_col="wafer", test_size=0.2):
+        """Scale features and targets per wafer to avoid data leakage across wafers.
+        Splits data into train/validation sets first, then fits scalers only on train wafers and applies them to validation wafers.
+
+        WARNING: This function's output is NOT compatible with sklearn's cross_val_score,
+        because cross_val_score does not refit scalers per fold, leading to data leakage if used with this per-wafer scaling.
+
+        Use custom group-aware CV with per-fold scaling to avoid leakage in cross-validation"""
+
         # Split first (to avoid info leak)
         X_train, X_val, y_train, y_val = train_test_split(X_full_pd, y_full_pd, test_size=test_size, random_state=42)
 
